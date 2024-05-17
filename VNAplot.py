@@ -105,6 +105,15 @@ AC_mem18_p.plot_s_db(m=1, n=0, color='black',label = 'mem18')
 AC_mem19_p.plot_s_db(m=1, n=0, color='pink',label = 'mem19')
 
 
+plt.figure("OS Impedance Params De-embedding on 8 pristine memristors")
+OS_mem12_p.plot_z_mag(m=1, n=0, color='red',label = 'mem12') 
+OS_mem13_p.plot_z_im(m=1, n=0, color='green',label = 'mem13')
+OS_mem14_p.plot_z_im(m=1, n=0, color='purple',label = 'mem14')
+OS_mem15_p.plot_z_im(m=1, n=0, color='blue',label = 'mem15')
+OS_mem16_p.plot_z_im(m=1, n=0, color='orange',label = 'mem16')
+OS_mem17_p.plot_z_im(m=1, n=0, color='yellow',label = 'mem17')
+OS_mem18_p.plot_z_im(m=1, n=0, color='black',label = 'mem18')
+OS_mem19_p.plot_z_im(m=1, n=0, color='pink',label = 'mem19')
 
 plt.show()
 
