@@ -2,8 +2,45 @@ import numpy as np
 import skrf as rf
 from skrf.calibration import OpenShort, SplitTee, AdmittanceCancel
 import matplotlib.pyplot as plt
+import os
+from dataclasses import dataclass
+import re
+from typing import Tuple
 
+# Define a class to store the VNA data alongside its ascociated with the filename, device index, and state
+@dataclass
+class S2PFile:
+    network: rf.Network
+    filename: str
+    wafer_number: int #wafer number 1 or 2
+    dev_row: int #row of device on wafer
+    dev_col: int #column of device on wafer
+    state: str
+
+
+# Define the path to the data
 path = ("/Users/horatiocox/Desktop/VNA_Analysis/mag_angle_260424/")
+
+# Get a list of all .s2p files in the directory
+files = [f for f in os.listdir(path) if f.endswith('.S2P')]
+
+# Read each file and store it in a list of S2PFile objects
+s2p_files = []
+for f in files:
+    network = rf.Network(path + f)
+    state = 'pristine' if any(x in f.lower() for x in ['pristine', 'Pristine']) else 'formed'
+    # Extract the row, colum and wafer numbers from the filename (e.g. wafer 1 r1_c11) and store into position variable
+    wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)[0]
+    r_number = re.findall(r'r(\d{1,2})', f, re.IGNORECASE)[0]
+    c_number = re.findall(r'c(\d{1,2})', f, re.IGNORECASE)[0]
+
+    s2p_files.append(S2PFile(network, f, int(wafer_number), int(r_number), int(c_number), state))
+
+# Now you can access each S2PFile object and its attributes
+# For example, to get all pristine S2PFile objects:
+pristine_files = [s for s in s2p_files if s.state == 'pristine']
+
+
 
 cal_thrutaper = rf.Network(path + 'Wafer2_r10_c1_thrutaper_1.S2P')
 cal_open = rf.Network(path + 'Wafer2_r10_c5_open_1.S2P')
@@ -15,6 +52,9 @@ cal_thrustraight = rf.Network(path + 'Wafer2_r10_c13_thru_1.S2P')
 
 dm = OpenShort(dummy_open=cal_open, dummy_short=cal_short, name='tutorial')
 OS_thru = dm.deembed(cal_thrutaper)
+
+dmsig = OpenShort(dummy_open=cal_opensig, dummy_short=cal_short, name='tutorial')
+OS_thrusig = dmsig.deembed(cal_thrutaper)
 
 dmST= SplitTee(dummy_thru=cal_thrutaper, name='tutorial2')
 ST_thru = dmST.deembed(cal_thrutaper)
@@ -29,6 +69,7 @@ cal_thrutaper.plot_s_db(m=1, n=0, color='red', label = 'raw')  # Plot only s21 a
 OS_thru.plot_s_db(m=1, n=0, color='green', label = 'OS')  # Plot only s21 and s12 with green color
 ST_thru.plot_s_db(m=1, n=0, color='purple', label = 'SplitTee')  
 AC_thru.plot_s_db(m=1, n=0, color='blue', label = 'AC')
+OS_thrusig.plot_s_db(m=1, n=0, color='orange', label = 'OSsig')
 #plt.figure("SplitPi De-embedding on the on-wafer thru measurement")
 #cal_thrutaper.plot_s_mag(m=1, n=0, color='red', label = 'raw')  # Plot only s21 and s12 with red color
 
