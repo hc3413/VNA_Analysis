@@ -28,133 +28,60 @@ files = [f for f in os.listdir(path) if f.endswith('.S2P')]
 s2p_files = []
 for f in files:
     network = rf.Network(path + f)
-    state = 'pristine' if any(x in f.lower() for x in ['pristine', 'Pristine']) else 'formed'
+    #state keywords to look for in filename, by default thru/short etc means the tapered version and it will have "notaper" in the filename if it is the straight thru
+    keywords = ['pristine', 'formed', 'smallform', 'fullform', 'thru', 'opensig', 'open', 'short','thrunotaper', 'opennotaper','shortnotaper', 'thruISS']
+    state = next((x for x in keywords if x in f.lower()), None) #returns the first keyword found in the state value, stops as soon as the first keyword is found
     # Extract the row, colum and wafer numbers from the filename (e.g. wafer 1 r1_c11) and store into position variable
-    wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)[0]
-    r_number = re.findall(r'r(\d{1,2})', f, re.IGNORECASE)[0]
-    c_number = re.findall(r'c(\d{1,2})', f, re.IGNORECASE)[0]
-
-    s2p_files.append(S2PFile(network, f, int(wafer_number), int(r_number), int(c_number), state))
-
-# Now you can access each S2PFile object and its attributes
-# For example, to get all pristine S2PFile objects:
-pristine_files = [s for s in s2p_files if s.state == 'pristine']
-
-
-
-cal_thrutaper = rf.Network(path + 'Wafer2_r10_c1_thrutaper_1.S2P')
-cal_open = rf.Network(path + 'Wafer2_r10_c5_open_1.S2P')
-cal_opensig = rf.Network(path + 'Wafer2_r10_c9_opensig_1.S2P')
-cal_short = rf.Network(path + 'Wafer2_r10_c11_shortall_1.S2P')
-cal_thrustraight = rf.Network(path + 'Wafer2_r10_c13_thru_1.S2P')
+    wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)
+    r_number = re.findall(r'_r(\d{1,2})_', f, re.IGNORECASE)
+    c_number = re.findall(r'_c(\d{1,2})_', f, re.IGNORECASE)
+    #store the network and its associated metadata in the S2PFile object grouped toegher in the s2p_files list
+    if not wafer_number or not r_number or not c_number:
+        s2p_files.append(S2PFile(network, f, None, None, None, state))
+    else:
+        s2p_files.append(S2PFile(network, f, int(wafer_number[0]), int(r_number[0]), int(c_number[0]), state.lower()))
+        
+    
+for s in s2p_files:
+    print(s.state)
 
 
+# Get the on wafer calibration data in a list of S2PFile objects
+cal_thru = [s for s in s2p_files if s.state == 'thru']
+cal_open = [s for s in s2p_files if s.state == 'open']
+cal_short = [s for s in s2p_files if s.state == 'short']
 
-dm = OpenShort(dummy_open=cal_open, dummy_short=cal_short, name='tutorial')
-OS_thru = dm.deembed(cal_thrutaper)
 
-dmsig = OpenShort(dummy_open=cal_opensig, dummy_short=cal_short, name='tutorial')
-OS_thrusig = dmsig.deembed(cal_thrutaper)
 
-dmST= SplitTee(dummy_thru=cal_thrutaper, name='tutorial2')
-ST_thru = dmST.deembed(cal_thrutaper)
+# Group files by their state so I can plot and compare states
+pristine = [s for s in s2p_files if s.state == 'pristine']
+formed = [s for s in s2p_files if s.state in ['formed', 'smallform', 'fullform']]
 
-dmAC = AdmittanceCancel(dummy_thru = cal_thrutaper, name='tutorial3')
-AC_thru = dmAC.deembed(cal_thrutaper)
+# Group files with the same [r_number, c_number] values together so I can plot each device in all its states on one graph
+# Stores a list of S2PFile objects for each device in a dictionary, "dev", with the key being the device's [r_number, c_number] values
+#thus dev['11'] will have all the data for the device in row 1 column 1
+dev = {}
+for s in s2p_files:
+    key = f"{s.dev_row}{s.dev_col}"
+    if key in dev:
+        dev[key].append(s)
+    else:
+        dev[key] = [s]
 
-# Plot before and after de-embedding on the Thru device on wafer
-
+#on assumption of multiple measurements of cal_open and cal_short i will store them in dm_x and you can test the different calibrations effectiveness
+dm = [] #initialize an empty list to store the de-embedded data
+cal_thru_OS = [] #initialize an empty list to store the de-embedded data applied to the thru for reference to see how effective de-embedding is
 plt.figure("Open Short De-embedding on the on-wafer thru measurement")
-cal_thrutaper.plot_s_db(m=1, n=0, color='red', label = 'raw')  # Plot only s21 and s12 with red color
-OS_thru.plot_s_db(m=1, n=0, color='green', label = 'OS')  # Plot only s21 and s12 with green color
-ST_thru.plot_s_db(m=1, n=0, color='purple', label = 'SplitTee')  
-AC_thru.plot_s_db(m=1, n=0, color='blue', label = 'AC')
-OS_thrusig.plot_s_db(m=1, n=0, color='orange', label = 'OSsig')
-#plt.figure("SplitPi De-embedding on the on-wafer thru measurement")
-#cal_thrutaper.plot_s_mag(m=1, n=0, color='red', label = 'raw')  # Plot only s21 and s12 with red color
+print(len(cal_open),len(cal_short),len(cal_thru))
+for x in range(len(cal_open)):
+    dm[x] = OpenShort(dummy_open=cal_open[x].network, dummy_short=cal_short[x].network, name='OpenShort Calibration')
+    cal_thru_OS[x] = dm[x].deembed(cal_thru[x].network)
+  
+    cal_thru[x].network.plot_s_db(m=1, n=0, color='red', label = f'raw_{x}')  # Plot only s21 with red color and label it as raw_x_x
+    cal_thru_OS[x].plot_s_db(m=1, n=0, color='green', label = f'OS_{x}')  # Plot only s21 with green color
 
-
-
-
-
-
-# Now looking at Memristors
-pristine_mem1 = rf.Network(path + 'Wafer2_r1_c2_pristine_1.S2P')
-OS_pristine_mem1 = dm.deembed(pristine_mem1)
-ST_pristine_mem1 = dmST.deembed(pristine_mem1)
-AC_pristine_mem1 = dmAC.deembed(pristine_mem1)
-
-
-plt.figure("DB: Open Short De-embedding on pristine memristor")
-pristine_mem1.plot_s_mag(m=1, n=0, color='red',label = 'raw')  # Plot only s21 and s12 with red color
-OS_pristine_mem1.plot_s_mag(m=1, n=0, color='green', label = 'OS')  # Plot only s21 and s12 with green color
-#ST_pristine_mem1.plot_s_mag(m=1, n=0, color='purple', label = 'SplitTee')  
-AC_pristine_mem1.plot_s_mag(m=1, n=0, color='blue', label = 'AC')
-
-
-#plt.figure("Impedance Params: Open Short De-embedding on pristine memristor")
-#pristine_mem1.plot_z_im(m=1, n=0, color='red',label = 'raw')
-#OS_pristine_mem1.plot_z_im(m=1, n=0, color='green', label = 'de-embedded')
-
-
-#Comparing Memristors de-embedded with different methods
-mem12_p = rf.Network(path + 'Wafer2_r1_c2_pristine_1.S2P')
-mem13_p = rf.Network(path + 'Wafer2_r1_c3_pristine_1.S2P')
-mem14_p = rf.Network(path + 'Wafer2_r1_c4_pristine_1.S2P')
-mem15_p = rf.Network(path + 'Wafer2_r1_c5_pristine_1.S2P')
-mem16_p = rf.Network(path + 'Wafer2_r1_c6_pristine_1.S2P')
-mem17_p = rf.Network(path + 'Wafer2_r1_c7_pristine_1.S2P')
-mem18_p = rf.Network(path + 'Wafer2_r1_c8_pristine_1.S2P')
-mem19_p = rf.Network(path + 'Wafer2_r1_c9_pristine_1.S2P')
-
-OS_mem12_p = dm.deembed(mem12_p)
-OS_mem13_p = dm.deembed(mem13_p)
-OS_mem14_p = dm.deembed(mem14_p)
-OS_mem15_p = dm.deembed(mem15_p)
-OS_mem16_p = dm.deembed(mem16_p)
-OS_mem17_p = dm.deembed(mem17_p)
-OS_mem18_p = dm.deembed(mem18_p)
-OS_mem19_p = dm.deembed(mem19_p)
-
-AC_mem12_p = dmAC.deembed(mem12_p)
-AC_mem13_p = dmAC.deembed(mem13_p)
-AC_mem14_p = dmAC.deembed(mem14_p)
-AC_mem15_p = dmAC.deembed(mem15_p)
-AC_mem16_p = dmAC.deembed(mem16_p)
-AC_mem17_p = dmAC.deembed(mem17_p)
-AC_mem18_p = dmAC.deembed(mem18_p)
-AC_mem19_p = dmAC.deembed(mem19_p)
-
-plt.figure("OS De-embedding on 8 pristine memristors")
-OS_mem12_p.plot_s_db(m=1, n=0, color='red',label = 'mem12') 
-OS_mem13_p.plot_s_db(m=1, n=0, color='green',label = 'mem13')
-OS_mem14_p.plot_s_db(m=1, n=0, color='purple',label = 'mem14')
-OS_mem15_p.plot_s_db(m=1, n=0, color='blue',label = 'mem15')
-OS_mem16_p.plot_s_db(m=1, n=0, color='orange',label = 'mem16')
-OS_mem17_p.plot_s_db(m=1, n=0, color='yellow',label = 'mem17')
-OS_mem18_p.plot_s_db(m=1, n=0, color='black',label = 'mem18')
-OS_mem19_p.plot_s_db(m=1, n=0, color='pink',label = 'mem19')
-
-plt.figure("AC De-embedding on 8 pristine memristors")
-AC_mem12_p.plot_s_db(m=1, n=0, color='red',label = 'mem12')
-AC_mem13_p.plot_s_db(m=1, n=0, color='green',label = 'mem13')
-AC_mem14_p.plot_s_db(m=1, n=0, color='purple',label = 'mem14')
-AC_mem15_p.plot_s_db(m=1, n=0, color='blue',label = 'mem15')
-AC_mem16_p.plot_s_db(m=1, n=0, color='orange',label = 'mem16')
-AC_mem17_p.plot_s_db(m=1, n=0, color='yellow',label = 'mem17')
-AC_mem18_p.plot_s_db(m=1, n=0, color='black',label = 'mem18')
-AC_mem19_p.plot_s_db(m=1, n=0, color='pink',label = 'mem19')
-
-
-plt.figure("OS Impedance Params De-embedding on 8 pristine memristors")
-OS_mem12_p.plot_z_mag(m=1, n=0, color='red',label = 'mem12') 
-OS_mem13_p.plot_z_im(m=1, n=0, color='green',label = 'mem13')
-OS_mem14_p.plot_z_im(m=1, n=0, color='purple',label = 'mem14')
-OS_mem15_p.plot_z_im(m=1, n=0, color='blue',label = 'mem15')
-OS_mem16_p.plot_z_im(m=1, n=0, color='orange',label = 'mem16')
-OS_mem17_p.plot_z_im(m=1, n=0, color='yellow',label = 'mem17')
-OS_mem18_p.plot_z_im(m=1, n=0, color='black',label = 'mem18')
-OS_mem19_p.plot_z_im(m=1, n=0, color='pink',label = 'mem19')
+plt.figure("De-embedded data for the devices")
+print(cal_open)
 
 plt.show()
 
