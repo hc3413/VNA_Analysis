@@ -12,6 +12,9 @@ import re
 from typing import Tuple
 import matplotlib.cm as cm
 
+# Define the path to the data
+path = ("/Users/horatiocox/Desktop/VNA_Analysis/mag_angle_260424/")
+
 # Define a class to store the VNA data alongside its ascociated with the filename, device index, and state
 @dataclass
 class S2PFile:
@@ -22,9 +25,29 @@ class S2PFile:
     dev_col: int #column of device on wafer
     state: str
 
+# Function to import the data from the VNA files and store it in a list of S2PFile objects
+def import_data(path: str):
+    # Get a list of all .s2p files in the directory
+    files = [f for f in os.listdir(path) if f.endswith('.S2P')]
 
-# Define the path to the data
-path = ("/Users/horatiocox/Desktop/VNA_Analysis/mag_angle_260424/")
+    # Read each file and store it in a list of S2PFile objects
+    s2p_files = []
+    for f in files:
+        network = rf.Network(path + f)
+        #state keywords to look for in filename, by default thru/short etc means the tapered version and it will have "notaper" in the filename if it is the straight thru
+        #note that smaller words that are substrings of larger words should be placed after the larger words in the list
+        keywords = ['smallform', 'fullform', 'opensig','thrunotaper', 'opennotaper','shortnotaper', 'thruISS','pristine', 'formed', 'thru', 'open', 'short']
+        state = next((x for x in keywords if x in f.lower()), None) #returns the first keyword found in the state value, stops as soon as the first keyword is found
+        # Extract the row, colum and wafer numbers from the filename (e.g. wafer 1 r1_c11) and store into position variable
+        wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)
+        r_number = re.findall(r'_r(\d{1,2})_', f, re.IGNORECASE)
+        c_number = re.findall(r'_c(\d{1,2})_', f, re.IGNORECASE)
+        #store the network and its associated metadata in the S2PFile object grouped toegher in the s2p_files list
+        if not wafer_number or not r_number or not c_number:
+            s2p_files.append(S2PFile(network, f, int(0), None, None, state)) #ISS is classes as wafer zero
+        else:
+            s2p_files.append(S2PFile(network, f, int(wafer_number[0]), int(r_number[0]), int(c_number[0]), state.lower()))
+    return s2p_files
 
 # Get a list of all .s2p files in the directory
 files = [f for f in os.listdir(path) if f.endswith('.S2P')]
@@ -90,7 +113,7 @@ for x in range(len(cal_open)):
         if s.dev_row == 1:
             print(s.dev_row, s.dev_col, s.state)
             plt.figure(f'Open Short De-embedding on Device_{s.dev_row}_{s.dev_col}, cal_num = {x}')
-            #s.network.plot_s_db(m=1, n=0, color=colors[count], linestyle='dashed',label = f'raw_{s.filename[-9:-4]}_{s.state}')  # Plot only s21 with red color and label it as raw_x_x
+            s.network.plot_s_db(m=1, n=0, color=colors[count], linestyle='dashed',label = f'raw_{s.filename[-9:-4]}_{s.state}')  # Plot only s21 with red color and label it as raw_x_x
             dm[x].deembed(s.network).plot_s_db(m=1, n=0, color=colors[count], label = f'OS_{s.filename[-9:-4]}_{s.state}')  # Plot only s21 with colorblind colormap
         count += 1
     
