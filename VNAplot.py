@@ -1,3 +1,7 @@
+#source VNAenv/bin/activate (launching and exiting the virtual environment containing the required modules, stored in the working directory for VNA_Analysis)
+#VNAenv/bin/python your_script.py - for running a script in the virtual environment
+#source deactivate
+
 import numpy as np
 import skrf as rf
 from skrf.calibration import OpenShort, SplitTee, AdmittanceCancel
@@ -6,6 +10,7 @@ import os
 from dataclasses import dataclass
 import re
 from typing import Tuple
+import matplotlib.cm as cm
 
 # Define a class to store the VNA data alongside its ascociated with the filename, device index, and state
 @dataclass
@@ -29,7 +34,8 @@ s2p_files = []
 for f in files:
     network = rf.Network(path + f)
     #state keywords to look for in filename, by default thru/short etc means the tapered version and it will have "notaper" in the filename if it is the straight thru
-    keywords = ['pristine', 'formed', 'smallform', 'fullform', 'thru', 'opensig', 'open', 'short','thrunotaper', 'opennotaper','shortnotaper', 'thruISS']
+    #note that smaller words that are substrings of larger words should be placed after the larger words in the list
+    keywords = ['smallform', 'fullform', 'opensig','thrunotaper', 'opennotaper','shortnotaper', 'thruISS','pristine', 'formed', 'thru', 'open', 'short']
     state = next((x for x in keywords if x in f.lower()), None) #returns the first keyword found in the state value, stops as soon as the first keyword is found
     # Extract the row, colum and wafer numbers from the filename (e.g. wafer 1 r1_c11) and store into position variable
     wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)
@@ -37,20 +43,18 @@ for f in files:
     c_number = re.findall(r'_c(\d{1,2})_', f, re.IGNORECASE)
     #store the network and its associated metadata in the S2PFile object grouped toegher in the s2p_files list
     if not wafer_number or not r_number or not c_number:
-        s2p_files.append(S2PFile(network, f, None, None, None, state))
+        s2p_files.append(S2PFile(network, f, int(0), None, None, state)) #ISS is classes as wafer zero
     else:
         s2p_files.append(S2PFile(network, f, int(wafer_number[0]), int(r_number[0]), int(c_number[0]), state.lower()))
         
-    
 for s in s2p_files:
-    print(s.state)
-
+    print(s.dev_row, s.dev_col)
 
 # Get the on wafer calibration data in a list of S2PFile objects
-cal_thru = [s for s in s2p_files if s.state == 'thru']
+ISS_thru = [s for s in s2p_files if s.state == 'thru' and s.wafer_number == 0]
+cal_thru = [s for s in s2p_files if s.state == 'thru' and s.wafer_number != 0]
 cal_open = [s for s in s2p_files if s.state == 'open']
 cal_short = [s for s in s2p_files if s.state == 'short']
-
 
 
 # Group files by their state so I can plot and compare states
@@ -68,20 +72,62 @@ for s in s2p_files:
     else:
         dev[key] = [s]
 
+#for key, value in dev.items():
+    #print(key)
+
+
 #on assumption of multiple measurements of cal_open and cal_short i will store them in dm_x and you can test the different calibrations effectiveness
 dm = [] #initialize an empty list to store the de-embedded data
 cal_thru_OS = [] #initialize an empty list to store the de-embedded data applied to the thru for reference to see how effective de-embedding is
-plt.figure("Open Short De-embedding on the on-wafer thru measurement")
-print(len(cal_open),len(cal_short),len(cal_thru))
 for x in range(len(cal_open)):
-    dm[x] = OpenShort(dummy_open=cal_open[x].network, dummy_short=cal_short[x].network, name='OpenShort Calibration')
-    cal_thru_OS[x] = dm[x].deembed(cal_thru[x].network)
+    dm.append(OpenShort(dummy_open=cal_open[x].network, dummy_short=cal_short[x].network, name='OpenShort Calibration'))
+    cal_thru_OS.append(dm[x].deembed(cal_thru[x].network))
   
+    num_colors = len(s2p_files)
+    count = 0
+    colors = plt.cm.jet(np.linspace(0,1,num_colors))
+    for s in s2p_files:
+        if s.dev_row == 1:
+            print(s.dev_row, s.dev_col, s.state)
+            plt.figure(f'Open Short De-embedding on Device_{s.dev_row}_{s.dev_col}, cal_num = {x}')
+            #s.network.plot_s_db(m=1, n=0, color=colors[count], linestyle='dashed',label = f'raw_{s.filename[-9:-4]}_{s.state}')  # Plot only s21 with red color and label it as raw_x_x
+            dm[x].deembed(s.network).plot_s_db(m=1, n=0, color=colors[count], label = f'OS_{s.filename[-9:-4]}_{s.state}')  # Plot only s21 with colorblind colormap
+        count += 1
+    
+    plt.figure(f'Open Short De-embedding on the on-wafer thru measurement, cal_num = {x}')
     cal_thru[x].network.plot_s_db(m=1, n=0, color='red', label = f'raw_{x}')  # Plot only s21 with red color and label it as raw_x_x
     cal_thru_OS[x].plot_s_db(m=1, n=0, color='green', label = f'OS_{x}')  # Plot only s21 with green color
 
-plt.figure("De-embedded data for the devices")
-print(cal_open)
+
+# Compare Memristors in different states
+# print('open_',len(cal_open),'short_',len(cal_short),'thru_',len(cal_thru))
+# for x in range(len(cal_open)):
+#     dm.append(OpenShort(dummy_open=cal_open[x].network, dummy_short=cal_short[x].network, name='OpenShort Calibration'))
+#     cal_thru_OS.append(dm[x].deembed(cal_thru[x].network))
+  
+#     n = len(s2p_files)
+#     count = 0
+#     colors = plt.cm.jet(np.linspace(0,1,n))
+#     for s in s2p_files:
+#         if s.dev_row == 1:
+#             print(s.dev_row, s.dev_col, s.state)
+#             plt.figure(f'Open Short De-embedding on {s.state} Device_{s.dev_row}_{s.dev_col}, cal_num = {x}')
+#             s.network.plot_s_db(m=1, n=0, color='red', linestyle='dashed',label = f'raw_{s.filename[-9:-4]}')  # Plot only s21 with red color and label it as raw_x_x
+#             dm[x].deembed(s.network).plot_s_db(m=1, n=0, color=colors[count], label = f'OS_{s.filename[-9:-4]}')  # Plot only s21 with colorblind colormap
+#         count += 1
+    
+#     plt.figure(f'Open Short De-embedding on the on-wafer thru measurement, cal_num = {x}')
+#     cal_thru[x].network.plot_s_db(m=1, n=0, color='red', label = f'raw_{x}')  # Plot only s21 with red color and label it as raw_x_x
+#     cal_thru_OS[x].plot_s_db(m=1, n=0, color='green', label = f'OS_{x}')  # Plot only s21 with green color
+
+
 
 plt.show()
 
+# %%
+import numpy as np
+np.linspace(0,1,20)
+
+
+
+# %%
