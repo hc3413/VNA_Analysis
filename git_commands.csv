@@ -22,7 +22,7 @@ git stash pop #moved back to feature branch and this restores the stashed change
 
 Merging
 git checkout main # switch to main branch 1st
-git merge <name of branch to be merged>
+git merge <name of branch  -to be merged>
 git merge --squash <name of branch> # merges the branch into main without creating a merge commit 
 #thus creates a single commit on main branch containing all changes from source branch
 #but doesn't preserve history of source branch
