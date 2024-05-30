@@ -139,9 +139,14 @@ def calibration(s2p_files, open, short, thru, OS_plot):
 
 
 
-def keyplot(OS, dev, dev_selection_in, subset_in, x_limits, y_limits):
+def keyplot(OS, dev, dev_selection_in = [], subset_in = [], x_limits = [0, 20e9], y_limits = [0, 1],
+            slice = [0, -1], log_x = False, db = False, plot_type = 'S'):
     # Function to plot the data for the selected devices and states
+    # A number of inputs are given default values so they can be omitted from the function input if not required as they are quite standard
+    # The default values also means that you can call them by name and not require the perfect ordring of the inputs
     # Needs dev_selection_in/subset_in to be local to function hence the _in suffix
+    
+    
     
     # Check if the dev_selection_in is empty or 'all' and set the dev_selection_in to all devices if so
     if not dev_selection_in or dev_selection_in == 'all':
@@ -161,8 +166,7 @@ def keyplot(OS, dev, dev_selection_in, subset_in, x_limits, y_limits):
             
             fig, ax = plt.subplots()
             ax.set_title(f'Device_{key}')
-            ax.set_xlabel('Frequency (Hz)')
-            ax.set_ylabel('Magnitude (dB)')
+            
             
             #ax.set_xlim(x_limits)
             #ax.set_ylim(y_limits)
@@ -175,10 +179,30 @@ def keyplot(OS, dev, dev_selection_in, subset_in, x_limits, y_limits):
                 if subset_check(r):
                     #ax.plot(r.network.s_mag[:, 1, 0], color=colors[color_count], linestyle='dashed',label = f'Raw: {r.label}')  # Plot only s21 with colorblind colormap
                     data = OS.deembed(r.network)
-                    ax.plot(np.log10(data.f), data.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')  # Plot only s21 with colorblind colormap          
+                    #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
+                    data_sliced = rf.Network(frequency=data.f[slice[0]:slice[1]], s=data.s[slice[0]:slice[1],:,:], z0=data.z0[slice[0]:slice[1],:])
+                    
+                    ####**********I think that the data_sliced is a network object 
+                    # ####and the transform maybe only works on the s parameter of the network object???????
+                    #####
+                    if plot_type == 'S':
+                        data_sliced_transformed = data_sliced
+                    elif plot_type == 'Z':
+                        data_sliced_transformed = rf.s2z(data_sliced)
+                    elif plot_type == 'Y':
+                        data_sliced_transformed = rf.s2y(data_sliced)   
+                    elif plot_type == 'T':
+                        data_sliced_transformed = rf.s2t(data_sliced)
+                    elif plot_type == 'ABCD':
+                        data_sliced_transformed = rf.s2a(data_sliced)
+                    
+                    #ax.plot(np.log10(data_sliced_transformed.f), data_sliced_transformed.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')  # Plot only s21 with colorblind colormap          
+                    data_sliced_transformed.plot_s_smith(m=1,n=1,draw_labels=True, color=colors[color_count], label = f'OS: {r.filename}') 
                     color_count += 1
-                
-            ax.legend()
+ 
+            ax.set_xlabel('Frequency (Hz)')
+            ax.set_ylabel('Magnitude (dB)')   
+            #ax.legend(loc='upper left')
     return fig, ax
 
 
@@ -228,38 +252,40 @@ OS = calibration(s2p_files, cal_open, cal_short, cal_thru,OS_plot) #calibration 
 
 #-------------------Plotting-------------------
 
+#########create a class which is a plotobject containing all of the below where the class puts in default values if they aren't specified then I can 
+#########just set the class object for each plot and then feed the class object into keyplot to generate the plot
+#plotobject = PlotObject(OS, dev, dev_selection, subset, x_limits, y_limits, slice)
+#fig, ax = keyplot(plotobject)
+
+
 dev_selection = ['r2c1'] #specific devices to plot (all/empty plots all devices)
 subset = ['formed']; #Select only runs that contain any of the subset strings in their (all/empty plots all states)
 x_limits = [0, 20e9] #limits for the x-axis of the plot
 y_limits = [0, 1] #limits for the y-axis of the plot
-#keyplot(OS, dev, dev_selection,subset, x_limits, y_limits)
+slice = [100, -1] #slice the data to remove the low frequency noise ([0, -1] means no slicing)
+#keyplot(OS, dev, dev_selection,subset, x_limits, y_limits, slice)
 
-fig_pristine, ax_pristine = keyplot(OS, dev, dev_selection,['pristine'], x_limits, y_limits)
-fig_formed, ax_formed = keyplot(OS, dev, dev_selection,['formed'], x_limits, y_limits)
+fig_pristine, ax_pristine = keyplot(OS, dev, dev_selection,['pristine'], x_limits, y_limits, slice)
+fig_formed, ax_formed = keyplot(OS, dev, dev_selection,['formed'], x_limits, y_limits, slice)
 plt.show()
 
+#-------------------Network Set-------------------
+#takes a dictionary or list of networks as its input and converts to a network set object that can give errors etc for repeated measurements
+# Convert the dev dictionary of lists of s2p files into a dictionary of lists of networks
 
-# Compare Memristors in different states
-# print('open_',len(cal_open),'short_',len(cal_short),'thru_',len(cal_thru))
-# for x in range(len(cal_open)):
-#     dm.append(OpenShort(dummy_open=cal_open[x].network, dummy_short=cal_short[x].network, name='OpenShort Calibration'))
-#     cal_thru_OS.append(dm[x].deembed(cal_thru[x].network))
-  
-#     n = len(s2p_files)
-#     count = 0
-#     colors = plt.cm.jet(np.linspace(0,1,n))
-#     for s in s2p_files:
-#         if s.dev_row == 1:
-#             print(s.dev_row, s.dev_col, s.state)
-#             plt.figure(f'Open Short De-embedding on {s.state} Device_{s.dev_row}_{s.dev_col}, cal_num = {x}')
-#             s.network.plot_s_db(m=1, n=0, color='red', linestyle='dashed',label = f'raw_{s.filename[-9:-4]}')  # Plot only s21 with red color and label it as raw_x_x
-#             dm[x].deembed(s.network).plot_s_db(m=1, n=0, color=colors[count], label = f'OS_{s.filename[-9:-4]}')  # Plot only s21 with colorblind colormap
-#         count += 1
-    
-#     plt.figure(f'Open Short De-embedding on the on-wafer thru measurement, cal_num = {x}')
-#     cal_thru[x].network.plot_s_db(m=1, n=0, color='red', label = f'raw_{x}')  # Plot only s21 with red color and label it as raw_x_x
-#     cal_thru_OS[x].plot_s_db(m=1, n=0, color='green', label = f'OS_{x}')  # Plot only s21 with green color
+#need filtering, probably taken from the keyplot function to select the devices and states to include in the network set
+# probably actually just want to make this another keyplot function that takes the network set as an input and then plots the data
 
+# dev_networks = {}
+# for key, value in dev.items():
+#     dev_networks[key] = [s.network for s in value]
+
+# ro_ns = NetworkSet(dev_networks, name='ro set')
+
+
+
+#--------------------------------------------------
+#--------------------------------------------------
 
 
 
