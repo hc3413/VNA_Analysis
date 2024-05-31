@@ -96,8 +96,6 @@ def calibration(s2p_files, open, short, thru, OS_plot):
     # Prints the error and its integral for each de-embedding protocol to help select the best de-embedding data
   
     dm = [] #initialize an empty list to store the de-embedded data
-   
-    #Initiate numpy array with dimenisons of the number of open/short/thru measurements to store the error for each de-embedding protocol
     error = [] #initialize an empty list to store the error for each de-embedding protocol
     num_colors = len(open)*len(short)*len(thru)
     colors = plt.cm.jet(np.linspace(0,1,num_colors))
@@ -140,13 +138,14 @@ def calibration(s2p_files, open, short, thru, OS_plot):
 
 
 def keyplot(OS, dev, dev_selection_in = [], subset_in = [], x_limits = [0, 20e9], y_limits = [0, 1],
-            slice = [0, -1], log_x = False, db = False, plot_type = 'S'):
+            slice_range = slice(0,-1), log_x = False, db = False, plot_type = 'S'):
     # Function to plot the data for the selected devices and states
     # A number of inputs are given default values so they can be omitted from the function input if not required as they are quite standard
     # The default values also means that you can call them by name and not require the perfect ordring of the inputs
     # Needs dev_selection_in/subset_in to be local to function hence the _in suffix
+    #Plot type can be S, Z, Y, T, ABCD, or Smith
     
-    
+    plot_type = plot_type.lower() #remove case sensitivity
     
     # Check if the dev_selection_in is empty or 'all' and set the dev_selection_in to all devices if so
     if not dev_selection_in or dev_selection_in == 'all':
@@ -180,26 +179,44 @@ def keyplot(OS, dev, dev_selection_in = [], subset_in = [], x_limits = [0, 20e9]
                     #ax.plot(r.network.s_mag[:, 1, 0], color=colors[color_count], linestyle='dashed',label = f'Raw: {r.label}')  # Plot only s21 with colorblind colormap
                     data = OS.deembed(r.network)
                     #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
-                    data_sliced = rf.Network(frequency=data.f[slice[0]:slice[1]], s=data.s[slice[0]:slice[1],:,:], z0=data.z0[slice[0]:slice[1],:])
+                    data_sliced = data[slice_range]
                     
                     ####**********I think that the data_sliced is a network object 
                     # ####and the transform maybe only works on the s parameter of the network object???????
                     #####
-                    if plot_type == 'S':
-                        data_sliced_transformed = data_sliced
-                    elif plot_type == 'Z':
-                        data_sliced_transformed = rf.s2z(data_sliced)
-                    elif plot_type == 'Y':
-                        data_sliced_transformed = rf.s2y(data_sliced)   
-                    elif plot_type == 'T':
-                        data_sliced_transformed = rf.s2t(data_sliced)
-                    elif plot_type == 'ABCD':
-                        data_sliced_transformed = rf.s2a(data_sliced)
                     
-                    #ax.plot(np.log10(data_sliced_transformed.f), data_sliced_transformed.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')  # Plot only s21 with colorblind colormap          
-                    data_sliced_transformed.plot_s_smith(m=1,n=1,draw_labels=True, color=colors[color_count], label = f'OS: {r.filename}') 
-                    color_count += 1
+                    if plot_type == 's':
+                        ax.plot(data_sliced.f, data_sliced.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
+                        color_count += 1
+                        
+                    elif plot_type == 'z':
+                        #data_sliced_transformed = rf.s2z(data_sliced)
+                        ax.plot(data_sliced.f, data_sliced.z_mag[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
+                        color_count += 1
+                        
+                    elif plot_type == 'y':
+                        data_sliced_transformed = rf.s2y(data_sliced)   
+                        ax.plot(np.log10(data_sliced_transformed.f), data_sliced_transformed.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
+                        color_count += 1
+                        
+                    elif plot_type == 't':
+                        data_sliced_transformed = rf.s2t(data_sliced)
+                        ax.plot(np.log10(data_sliced_transformed.f), data_sliced_transformed.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
+                        color_count += 1
+                        
+                    elif plot_type == 'abcd':
+                        data_sliced_transformed = rf.s2a(data_sliced)
+                        ax.plot(np.log10(data_sliced_transformed.f), data_sliced_transformed.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
+                        color_count += 1
+                        
+                    elif plot_type == 'smith':
+                        data_sliced_transformed = data_sliced
+                        data_sliced_transformed.plot_s_smith(m=1,n=1,draw_labels=True, color=colors[color_count], label = f'OS: {r.filename}') 
+                        color_count += 1
  
+            if log_x:
+                        ax.set_xscale('log')
+                        
             ax.set_xlabel('Frequency (Hz)')
             ax.set_ylabel('Magnitude (dB)')   
             #ax.legend(loc='upper left')
@@ -262,11 +279,13 @@ dev_selection = ['r2c1'] #specific devices to plot (all/empty plots all devices)
 subset = ['formed']; #Select only runs that contain any of the subset strings in their (all/empty plots all states)
 x_limits = [0, 20e9] #limits for the x-axis of the plot
 y_limits = [0, 1] #limits for the y-axis of the plot
-slice = [100, -1] #slice the data to remove the low frequency noise ([0, -1] means no slicing)
-#keyplot(OS, dev, dev_selection,subset, x_limits, y_limits, slice)
+#keyplot(OS, dev, dev_selection_in = [], subset_in = [], x_limits = [0, 20e9], y_limits = [0, 1],
+            #slice = [0, -1], log_x = False, db = False, plot_type = 'S'):
+#slice_range: slice the data to remove the low frequency noise - default = no slicing - input form should be either '10-20ghz' or slice(1:10)
 
-fig_pristine, ax_pristine = keyplot(OS, dev, dev_selection,['pristine'], x_limits, y_limits, slice)
-fig_formed, ax_formed = keyplot(OS, dev, dev_selection,['formed'], x_limits, y_limits, slice)
+fig_pristine, ax_pristine = keyplot(OS, dev, dev_selection_in = dev_selection,subset_in = ['pristine'], plot_type = 'S',
+                                    log_x=True)
+fig_formed, ax_formed = keyplot(OS, dev, dev_selection_in = dev_selection,subset_in = ['formed'], plot_type = 'z', slice_range = '0.01-20ghz')
 plt.show()
 
 #-------------------Network Set-------------------
