@@ -14,6 +14,9 @@ from dataclasses import dataclass
 import re
 from typing import Tuple
 import matplotlib.cm as cm
+import itertools
+import scipy
+from scipy.signal import medfilt
 
 
 # Define a class to store the VNA data alongside its ascociated with the filename, device index, and state
@@ -137,89 +140,97 @@ def calibration(s2p_files, open, short, thru, OS_plot):
 
 
 
-def keyplot(OS, dev, dev_selection_in = [], subset_in = [], x_limits = [0, 20e9], y_limits = [0, 1],
-            slice_range = slice(0,-1), log_x = False, db = False, plot_type = 'S'):
+def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
+            x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1]):
     # Function to plot the data for the selected devices and states
     # A number of inputs are given default values so they can be omitted from the function input if not required as they are quite standard
     # The default values also means that you can call them by name and not require the perfect ordring of the inputs
-    # Needs dev_selection_in/subset_in to be local to function hence the _in suffix
-    #Plot type can be S, Z, Y, T, ABCD, or Smith
-    
-    plot_type = plot_type.lower() #remove case sensitivity
-    
-    # Check if the dev_selection_in is empty or 'all' and set the dev_selection_in to all devices if so
-    if not dev_selection_in or dev_selection_in == 'all':
-        dev_selection_in = dev.keys()
+    # Plot type can be S, Z, Y, T, ABCD, or Smith
+    #x_range: slice the data to remove the low frequency noise - default = no slicing - input form should be either '10-20ghz' or slice(1:10) for the first 10 points
+    #         slightly different to y range as we are slicing the data object instead of changing the range of the plot. 
+    #         necessary to generalise for the smith chart where you can't change axis limits to do this
 
-    # If subset_in is empty or 'all' then set the subset_check to always return True 
-    if not subset_in or subset_in == 'all':
+    # y_range = [0, 1] : 2 item list giving limits for the y-axis of the plot
+    # dev_selection = ['r2c1'] - specific devices to plot default is all devices
+    # subset = ['formed', 'pristine'] - Select only runs that contain any of the subset strings in their (all/empty plots all states) can make this a list of strings to select multiple subsets
+    # m_port/n_port: S-parameter to plot - m/n = 2/1 -> S21; can pass multiple into list so m_port=[1,2] n_port=[1] will plot S11, S21
+    # plot_type: Follows rf types so can be S, Z, Y, T, ABCD, or Smith with _db/_mag/_re/_im options for all except smith (e.g. S_db, Z_re, Smith)
+
+
+    plot_type = plot_type.lower() # removes case sensitivity for the plot type input (Smith/smith/SMITH... all work)
+   
+    # If no devices are selected then plot all devices stored in dev
+    if dev_selection is None:
+        dev_selection = dev.keys()
+
+    # If subset is empty or 'all' then set the subset_check to always return True 
+    if sub_set is None:
         subset_check = lambda x: True
-    # Else check if the filename contains any of the subset_in strings returning true/false to plot/not plot
+    # Else check if the filename contains any of the sub_set strings returning true/false to plot/not plot
     else:
-        subset_check = lambda x: any(m in x.filename.lower() for m in subset_in)
+        subset_check = lambda x: any(m in x.filename.lower() for m in sub_set)
    
     # Loop over the selected devices    
-    for key in dev_selection_in:
+    for key in dev_selection:
         if key in dev: #extract the s2p files for the selected devices
             value = dev[key] 
-            
             fig, ax = plt.subplots()
-            ax.set_title(f'Device_{key}')
-            
-            
-            #ax.set_xlim(x_limits)
-            #ax.set_ylim(y_limits)
+            ax.set_title(f'{plot_type}: Device_{key}')
             num_colors = sum(1 for r in value if subset_check(r)) #count the number of files that match the subset criteria to set the number of colors            
+            print(num_colors)
             colors = plt.cm.jet(np.linspace(0,1,num_colors))
             color_count = 0
-            
+            line_styles = ['-', '--', '-.', ':'] #list of line styles to cycle through for each plot
+            line_style_iterator = itertools.cycle(line_styles) #makes an iterator object that can be cyled through with next() to get the next line style
+
             # Loop over the s2p files for each select device plotting all that match the subset criteria
             for r in value:
                 if subset_check(r):
-                    #ax.plot(r.network.s_mag[:, 1, 0], color=colors[color_count], linestyle='dashed',label = f'Raw: {r.label}')  # Plot only s21 with colorblind colormap
+                    
                     data = OS.deembed(r.network)
                     #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
-                    data_sliced = data[slice_range]
-                    
-                    ####**********I think that the data_sliced is a network object 
-                    # ####and the transform maybe only works on the s parameter of the network object???????
-                    #####
-                    
-                    if plot_type == 's':
-                        ax.plot(data_sliced.f, data_sliced.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
-                        color_count += 1
-                        
-                    elif plot_type == 'z':
-                        #data_sliced_transformed = rf.s2z(data_sliced)
-                        ax.plot(data_sliced.f, data_sliced.z_mag[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
-                        color_count += 1
-                        
-                    elif plot_type == 'y':
-                        data_sliced_transformed = rf.s2y(data_sliced)   
-                        ax.plot(np.log10(data_sliced_transformed.f), data_sliced_transformed.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
-                        color_count += 1
-                        
-                    elif plot_type == 't':
-                        data_sliced_transformed = rf.s2t(data_sliced)
-                        ax.plot(np.log10(data_sliced_transformed.f), data_sliced_transformed.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
-                        color_count += 1
-                        
-                    elif plot_type == 'abcd':
-                        data_sliced_transformed = rf.s2a(data_sliced)
-                        ax.plot(np.log10(data_sliced_transformed.f), data_sliced_transformed.s_db[:, 1, 0], color=colors[color_count], label = f'OS: {r.filename}')
-                        color_count += 1
-                        
-                    elif plot_type == 'smith':
-                        data_sliced_transformed = data_sliced
-                        data_sliced_transformed.plot_s_smith(m=1,n=1,draw_labels=True, color=colors[color_count], label = f'OS: {r.filename}') 
-                        color_count += 1
+                    data_sliced = data[x_range]
+
+                    # Loop over the selected S-parameters to plot
+                    for mm in m_port:
+                        for nn in n_port:
+                            
+                            if plot_type == 'smith':
+                                data_sliced.plot_s_smith(m=mm,n=nn,draw_labels=True, color=colors[color_count],
+                                                                    linestyle = next(line_style_iterator), label = f'S_{mm}{nn} {r.filename}')   
+                                
+                            elif plot_type == 'inputz':
+                                med_kernel = 23
+                                Z11 = medfilt(data_sliced.z_re[:, 0, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 0], kernel_size=med_kernel)
+                                Z12 = medfilt(data_sliced.z_re[:, 0, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 1], kernel_size=med_kernel)
+                                Z21 = medfilt(data_sliced.z_re[:, 1, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 0], kernel_size=med_kernel)
+                                Z22 = medfilt(data_sliced.z_re[:, 1, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 1], kernel_size=med_kernel)
+                                Z_load = 50
+
+                                # Calculate the input impedance
+                                #z_in = Z11 - np.dot(Z12, Z21) / (Z22 + Z_load)
+                                z_in = abs(Z11-Z12)
+                                z_in = medfilt(z_in, kernel_size=17)
+                                ax.plot(data_sliced.f, z_in, color=colors[color_count],
+                                        linestyle = next(line_style_iterator), label = f'{plot_type}_{mm}{nn}: {r.filename}') 
+                                
+                                
+                            else:
+                                p_data = getattr(data_sliced, plot_type)[:, mm-1, nn-1]
+                                #apply median filter to the data to smooth it
+                                p_data_smoothed = medfilt(p_data, kernel_size=23)
+                                
+                                ax.plot(data_sliced.f, p_data_smoothed, color=colors[color_count],
+                                        linestyle = next(line_style_iterator), label = f'{plot_type}_{mm}{nn}: {r.filename}')   
+                    color_count += 1 # change color for each file (needs to be inside the subset check loop so it only changes for the files that are plotted)
  
             if log_x:
                         ax.set_xscale('log')
-                        
+            if y_range is not None:
+                ax.set_ylim(y_range)          
             ax.set_xlabel('Frequency (Hz)')
             ax.set_ylabel('Magnitude (dB)')   
-            #ax.legend(loc='upper left')
+            ax.legend(loc='upper right',fontsize='xx-small')
     return fig, ax
 
 
@@ -269,23 +280,28 @@ OS = calibration(s2p_files, cal_open, cal_short, cal_thru,OS_plot) #calibration 
 
 #-------------------Plotting-------------------
 
-#########create a class which is a plotobject containing all of the below where the class puts in default values if they aren't specified then I can 
-#########just set the class object for each plot and then feed the class object into keyplot to generate the plot
-#plotobject = PlotObject(OS, dev, dev_selection, subset, x_limits, y_limits, slice)
-#fig, ax = keyplot(plotobject)
+#def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
+           # x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1]):
+           
+#'inputz' - plots the input impedance of the device
+
+y_range_input = [0,40000]
+fig_pristine, ax_pristine = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['pristine'], plot_type = 'inputz',
+                                    log_x=False, m_port=[2], n_port=[1])
+fig_formed, ax_formed = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['formed'], plot_type = 'inputz',
+                                    log_x=False, m_port=[2], n_port=[1])
+fig_set, ax_set = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['_set','_set1', '_set2', '_set3','_set4', '_set5', '_set6','_set7', '_set8', '_set9',], plot_type = 'z_mag',
+                                    log_x=False, m_port=[2], n_port=[1], y_range=y_range_input)
+fig_reset, ax_reset = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['reset'], plot_type = 'z_mag',
+                                    log_x=False, m_port=[2], n_port=[1], y_range=y_range_input)
+fig_comp, ax_comp = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['formed_0dc','formed_pos0.0','c1_pristine.','pristine_pos0.2'], plot_type = 'inputz',
+                                    log_x=False, m_port=[2], n_port=[1])
 
 
-dev_selection = ['r2c1'] #specific devices to plot (all/empty plots all devices)
-subset = ['formed']; #Select only runs that contain any of the subset strings in their (all/empty plots all states)
-x_limits = [0, 20e9] #limits for the x-axis of the plot
-y_limits = [0, 1] #limits for the y-axis of the plot
-#keyplot(OS, dev, dev_selection_in = [], subset_in = [], x_limits = [0, 20e9], y_limits = [0, 1],
-            #slice = [0, -1], log_x = False, db = False, plot_type = 'S'):
-#slice_range: slice the data to remove the low frequency noise - default = no slicing - input form should be either '10-20ghz' or slice(1:10)
+fig_comp2, ax_comp2 = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['c1_reset.','reset2','reset3','_set.','_set1', '_set2', ], plot_type = 'inputz',
+                                    log_x=False, m_port=[2], n_port=[1])
 
-fig_pristine, ax_pristine = keyplot(OS, dev, dev_selection_in = dev_selection,subset_in = ['pristine'], plot_type = 'S',
-                                    log_x=True)
-fig_formed, ax_formed = keyplot(OS, dev, dev_selection_in = dev_selection,subset_in = ['formed'], plot_type = 'z', slice_range = '0.01-20ghz')
+
 plt.show()
 
 #-------------------Network Set-------------------
