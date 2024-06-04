@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import skrf as rf
 from skrf.calibration import OpenShort, SplitTee, AdmittanceCancel
+from skrf.calibration import IEEEP370_SE_NZC_2xThru
+
 import matplotlib.pyplot as plt
 import os
 import datetime
@@ -17,6 +19,7 @@ import matplotlib.cm as cm
 import itertools
 import scipy
 from scipy.signal import medfilt
+
 
 
 # Define a class to store the VNA data alongside its ascociated with the filename, device index, and state
@@ -92,7 +95,7 @@ def import_data(data_path: str):
     return s2p_files
 
 
-def calibration(s2p_files, open, short, thru, OS_plot):
+def calibration_OS(open, short, thru, plot_cal = False):
     # Function to generate an OpenShort De-embedding calibration and apply it to the on-wafer thru measurements
     # Inputs multiple open and short measurements and compares them to see which give the most effective de-embedding
     # Outputs a list of de-embedding data and plots of the thru measurements before and after de-embedding for each protocol
@@ -111,13 +114,14 @@ def calibration(s2p_files, open, short, thru, OS_plot):
             OS_th = [] #initiate list to store the de-embedded thru data for each open/short pair
             total_error = 0 #initialize variable to store the total error for each open/short pair
             for count_th,th in enumerate(thru, start=0):
+                        
                 if OS_plot:
                     plt.figure(f'Open Short De-embedding')
                     th.network.plot_s_mag(m=1, n=0, color=colors[color_count], linestyle='dashed',label = f'Raw: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
                     cal.deembed(th.network).plot_s_mag(m=1, n=0, color=colors[color_count], label = f'OS: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
                 #store the error for each de-embedding protocol in the respective array index
-                error_value = np.abs(np.sum(cal.deembed(th.network).s[:,1,0]))
-                total_error += error_value
+                error_value = np.abs(np.sum(cal.deembed(th.network).s[:,1,0]))+np.abs(np.sum(cal.deembed(th.network).s[:,0,1]))
+                total_error += error_value #sum the error for each open/short pair over every thru device
                 color_count += 1
             error.append(total_error)
             print(total_error)
@@ -129,7 +133,7 @@ def calibration(s2p_files, open, short, thru, OS_plot):
     print(f"Best de-embedding protocol: dm[{min_index}]={min(error)}, worst = {max(error)}")
     
     #Plot the best de-embedding protocol
-    if OS_plot:
+    if plot_cal:
         plt.figure('Best De-embedding Protocol')
         thru[0].network.plot_s_mag(m=1, n=0, color='red', linestyle='dashed',label = f'Raw')  # Plot only s21 with colorblind colormap
         dm[min_index].deembed(thru[0].network).plot_s_mag(m=1, n=0, color='green', label = f'Best OS:dm[{min_index}]')  # Plot only s21 with colorblind colormap
@@ -140,8 +144,66 @@ def calibration(s2p_files, open, short, thru, OS_plot):
 
 
 
-def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
-            x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1]):
+def calibration_2x(s2p_files, thru, plot_cal = False):
+    # Function to generate 2x calibration from the thru measurements (though these are strictly speaking 2x + length of DUT so it isn't perfect)
+    
+    # Inputs multiple open and short measurements and compares them to see which give the most effective de-embedding
+    # Outputs a list of de-embedding data and plots of the thru measurements before and after de-embedding for each protocol
+    # Prints the error and its integral for each de-embedding protocol to help select the best de-embedding data
+  
+    dm = [] #initialize an empty list to store the de-embedded data
+    error = [] #initialize an empty list to store the error for each de-embedding protocol
+    num_colors = len(thru)*(len(thru)-1) #as each thru cal, len(thru), will be applied to all other thru measurements, (len(thru)-1)
+    colors = plt.cm.jet(np.linspace(0,1,num_colors))
+    color_count = 0
+    
+    for count_o, o  in enumerate(open, start=0):
+        for count_sh, sh in enumerate(short, start=0):
+            if two_x == False: # applies OS calibration
+                cal = OpenShort(dummy_open=o.network, dummy_short=sh.network, name='OpenShort Calibration')
+                dm.append(cal)
+            
+            OS_th = [] #initiate list to store the de-embedded thru data for each open/short pair
+            total_error = 0 #initialize variable to store the total error for each open/short pair
+            for count_th,th in enumerate(thru, start=0):
+                if two_x == True: #applies a 2x calibration
+                    cal = IEEEP370_SE_NZC_2xThru(dummy_2xthru = th.network, name = '2xthru')
+                    dm.append(cal)
+                         
+                if OS_plot:
+                    plt.figure(f'Open Short De-embedding')
+                    th.network.plot_s_mag(m=1, n=0, color=colors[color_count], linestyle='dashed',label = f'Raw: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
+                    cal.deembed(th.network).plot_s_mag(m=1, n=0, color=colors[color_count], label = f'OS: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
+                #store the error for each de-embedding protocol in the respective array index
+                error_value = np.abs(np.sum(cal.deembed(th.network).s[:,1,0]))+np.abs(np.sum(cal.deembed(th.network).s[:,0,1]))
+                total_error += error_value #sum the error for each open/short pair over every thru device
+                color_count += 1
+            error.append(total_error)
+            print(total_error)
+    
+    #Find the best de-embedding protocol
+    min_index = error.index(min(error))
+    max_index = error.index(max(error))
+
+    print(f"Best de-embedding protocol: dm[{min_index}]={min(error)}, worst = {max(error)}")
+    
+    #Plot the best de-embedding protocol
+    if plot_cal:
+        plt.figure('Best De-embedding Protocol')
+        thru[0].network.plot_s_mag(m=1, n=0, color='red', linestyle='dashed',label = f'Raw')  # Plot only s21 with colorblind colormap
+        dm[min_index].deembed(thru[0].network).plot_s_mag(m=1, n=0, color='green', label = f'Best OS:dm[{min_index}]')  # Plot only s21 with colorblind colormap
+        dm[max_index].deembed(thru[0].network).plot_s_mag(m=1, n=0, color='blue', label = f'Worst OS:dm[{max_index}]')  # Plot only s21 with colorblind colormap
+   
+    #only return the best de-embedding protocol
+    return dm[min_index]
+
+
+
+
+
+
+def keyplot(OS, dev, dev_selection = None, sub_set = None, y_range = None,
+            x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1], deembed_data = True):
     # Function to plot the data for the selected devices and states
     # A number of inputs are given default values so they can be omitted from the function input if not required as they are quite standard
     # The default values also means that you can call them by name and not require the perfect ordring of the inputs
@@ -177,7 +239,7 @@ def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
             fig, ax = plt.subplots()
             ax.set_title(f'{plot_type}: Device_{key}')
             num_colors = sum(1 for r in value if subset_check(r)) #count the number of files that match the subset criteria to set the number of colors            
-            print(num_colors)
+            #print(num_colors)
             colors = plt.cm.jet(np.linspace(0,1,num_colors))
             color_count = 0
             line_styles = ['-', '--', '-.', ':'] #list of line styles to cycle through for each plot
@@ -187,7 +249,11 @@ def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
             for r in value:
                 if subset_check(r):
                     
-                    data = OS.deembed(r.network)
+                    if deembed_data == True:
+                        data = OS.deembed(r.network)
+                    else:
+                        data = r.network
+                        
                     #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
                     data_sliced = data[x_range]
 
@@ -208,17 +274,19 @@ def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
                                 Z_load = 50
 
                                 # Calculate the input impedance
-                                #z_in = Z11 - np.dot(Z12, Z21) / (Z22 + Z_load)
-                                z_in = abs(Z11-Z12)
-                                z_in = medfilt(z_in, kernel_size=17)
-                                ax.plot(data_sliced.f, z_in, color=colors[color_count],
-                                        linestyle = next(line_style_iterator), label = f'{plot_type}_{mm}{nn}: {r.filename}') 
-                                
+                                z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
+                                z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
+                                #z_in = abs(Z11-Z12)
+                                #z_in = medfilt(z_in, kernel_size=17)
+                                ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
+                                        linestyle = next(line_style_iterator), label = f'Z_in_mag{plot_type}_{mm}{nn}: {r.filename}') 
+                                ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
+                                        linestyle = next(line_style_iterator), label = f'Z_out_mag{plot_type}_{mm}{nn}: {r.filename}')
                                 
                             else:
                                 p_data = getattr(data_sliced, plot_type)[:, mm-1, nn-1]
                                 #apply median filter to the data to smooth it
-                                p_data_smoothed = medfilt(p_data, kernel_size=23)
+                                p_data_smoothed = p_data#medfilt(p_data, kernel_size=23)
                                 
                                 ax.plot(data_sliced.f, p_data_smoothed, color=colors[color_count],
                                         linestyle = next(line_style_iterator), label = f'{plot_type}_{mm}{nn}: {r.filename}')   
@@ -246,8 +314,17 @@ directory = ('/Users/horatiocox/Desktop/VNA_Analysis/CPW_mem_oscillator_220524/M
 
 # Import the data from the VNA files
 s2p_files = import_data(directory)
+# remove duplicate frequency points from all the thru data to prevent errors with skrf functions
 for f in s2p_files:
     print(f.filename,f.run, f.label)
+    indx = f.network.frequency.drop_non_monotonic_increasing()
+    # Remove the corresponding entries from the s-parameters array
+    unique_s = np.delete(f.network.s, indx, axis=0)
+    unique_z0 = np.delete(f.network.z0, indx, axis=0)
+    # Assign the unique s-parameters array back to the network object
+    f.network.s = unique_s
+    f.network.z0 = unique_z0
+    
 
 
 #-------------------Grouping-------------------
@@ -258,6 +335,10 @@ cal_open = [s for s in s2p_files if s.state == 'open' or s.state == 'opensig']# 
 cal_short = [s for s in s2p_files if s.state == 'short']
 
 
+# Clean the thru data to remove duplicate frequency points
+
+
+    
 # Group files by their state so I can plot and compare states
 pristine = [s for s in s2p_files if s.state == 'pristine']
 formed = [s for s in s2p_files if s.state in ['formed', 'smallform', 'fullform']]
@@ -273,36 +354,45 @@ for s in s2p_files:
     else:
         dev[key] = [s]
 
+
 #-------------------De-Embedding-------------------
 print('open_short_thru',len(cal_open),len(cal_short),len(cal_thru))
-OS_plot = False #whether to plot the de-embedding results
-OS = calibration(s2p_files, cal_open, cal_short, cal_thru,OS_plot) #calibration object outputted from all the on wafer measurements
+ #whether to plot the de-embedding results
+OS = calibration_OS(cal_open, cal_short, cal_thru, plot_cal = False) #calibration object outputted from all the on wafer measurements
+TX = calibration_2x(s2p_files, cal_thru, plot_cal = False) #calibration object outputted from all the on wafer measurements
 
 #-------------------Plotting-------------------
-
 #def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
-           # x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1]):
-           
+           # x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1]):        
 #'inputz' - plots the input impedance of the device
 
-y_range_input = [0,40000]
-fig_pristine, ax_pristine = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['pristine'], plot_type = 'inputz',
-                                    log_x=False, m_port=[2], n_port=[1])
-fig_formed, ax_formed = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['formed'], plot_type = 'inputz',
-                                    log_x=False, m_port=[2], n_port=[1])
-fig_set, ax_set = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['_set','_set1', '_set2', '_set3','_set4', '_set5', '_set6','_set7', '_set8', '_set9',], plot_type = 'z_mag',
-                                    log_x=False, m_port=[2], n_port=[1], y_range=y_range_input)
-fig_reset, ax_reset = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['reset'], plot_type = 'z_mag',
-                                    log_x=False, m_port=[2], n_port=[1], y_range=y_range_input)
-fig_comp, ax_comp = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['formed_0dc','formed_pos0.0','c1_pristine.','pristine_pos0.2'], plot_type = 'inputz',
-                                    log_x=False, m_port=[2], n_port=[1])
+x_range_input = "0.02-0.2ghz" #slice(0,-1)#
+y_range_input = None#[0,100]
+# fig_thru, ax_thru = keyplot(OS, dev, dev_selection = ['r10c1','r10c2','r10c3','r10c4'],sub_set = ['thru'], plot_type = 's_mag',
+#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
+# fig_thru2, ax_thru2 = keyplot(OS, dev, dev_selection = ['r10c1','r10c2','r10c3','r10c4'],sub_set = ['thru'], plot_type = 's_mag',
+#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
+
+fig_dev, ax_dev = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
+                                    log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
+fig_dev, ax_dev = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
+                                    log_x=False, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
+
+# fig_formed, ax_formed = keyplot(OS, dev, dev_selection = ['r1c4','r1c2'], plot_type = 'inputz',
+#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = True,y_range=y_range_input)
+
+# fig_formed2, ax_formed2 = keyplot(OS, dev, dev_selection = ['r1c4','r1c2'], plot_type = 'inputz',
+#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = False,y_range=y_range_input)
 
 
-fig_comp2, ax_comp2 = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['c1_reset.','reset2','reset3','_set.','_set1', '_set2', ], plot_type = 'inputz',
-                                    log_x=False, m_port=[2], n_port=[1])
+
+# fig_comp2, ax_comp2 = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['c1_reset.','reset2','reset3','_set.','_set1', '_set2', ], plot_type = 'inputz',
+#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = False)
 
 
 plt.show()
+
+#'_set','_set1', '_set2', '_set3','_set4', '_set5', '_set6','_set7', '_set8', '_set9',  formed_0dc','formed_pos0.0','c1_pristine.','pristine_pos0.2
 
 #-------------------Network Set-------------------
 #takes a dictionary or list of networks as its input and converts to a network set object that can give errors etc for repeated measurements
