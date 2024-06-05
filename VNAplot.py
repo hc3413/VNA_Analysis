@@ -111,11 +111,10 @@ def calibration_OS(open, short, thru, plot_cal = False):
             cal = OpenShort(dummy_open=o.network, dummy_short=sh.network, name='OpenShort Calibration')
             dm.append(cal)
             
-            OS_th = [] #initiate list to store the de-embedded thru data for each open/short pair
             total_error = 0 #initialize variable to store the total error for each open/short pair
             for count_th,th in enumerate(thru, start=0):
                         
-                if OS_plot:
+                if plot_cal:
                     plt.figure(f'Open Short De-embedding')
                     th.network.plot_s_mag(m=1, n=0, color=colors[color_count], linestyle='dashed',label = f'Raw: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
                     cal.deembed(th.network).plot_s_mag(m=1, n=0, color=colors[color_count], label = f'OS: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
@@ -144,7 +143,7 @@ def calibration_OS(open, short, thru, plot_cal = False):
 
 
 
-def calibration_2x(s2p_files, thru, plot_cal = False):
+def calibration_2x(thru, plot_cal = False):
     # Function to generate 2x calibration from the thru measurements (though these are strictly speaking 2x + length of DUT so it isn't perfect)
     
     # Inputs multiple open and short measurements and compares them to see which give the most effective de-embedding
@@ -152,40 +151,42 @@ def calibration_2x(s2p_files, thru, plot_cal = False):
     # Prints the error and its integral for each de-embedding protocol to help select the best de-embedding data
   
     dm = [] #initialize an empty list to store the de-embedded data
-    error = [] #initialize an empty list to store the error for each de-embedding protocol
+    total_error = [0.0] * len(thru) #initialize an empty list of floats to store the total error for each de-embedding protocol
     num_colors = len(thru)*(len(thru)-1) #as each thru cal, len(thru), will be applied to all other thru measurements, (len(thru)-1)
     colors = plt.cm.jet(np.linspace(0,1,num_colors))
     color_count = 0
     
-    for count_o, o  in enumerate(open, start=0):
-        for count_sh, sh in enumerate(short, start=0):
-            if two_x == False: # applies OS calibration
-                cal = OpenShort(dummy_open=o.network, dummy_short=sh.network, name='OpenShort Calibration')
-                dm.append(cal)
-            
-            OS_th = [] #initiate list to store the de-embedded thru data for each open/short pair
-            total_error = 0 #initialize variable to store the total error for each open/short pair
-            for count_th,th in enumerate(thru, start=0):
-                if two_x == True: #applies a 2x calibration
-                    cal = IEEEP370_SE_NZC_2xThru(dummy_2xthru = th.network, name = '2xthru')
-                    dm.append(cal)
-                         
-                if OS_plot:
-                    plt.figure(f'Open Short De-embedding')
-                    th.network.plot_s_mag(m=1, n=0, color=colors[color_count], linestyle='dashed',label = f'Raw: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
-                    cal.deembed(th.network).plot_s_mag(m=1, n=0, color=colors[color_count], label = f'OS: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
-                #store the error for each de-embedding protocol in the respective array index
-                error_value = np.abs(np.sum(cal.deembed(th.network).s[:,1,0]))+np.abs(np.sum(cal.deembed(th.network).s[:,0,1]))
-                total_error += error_value #sum the error for each open/short pair over every thru device
+    # Generate calibration objects for each thru device
+    for t  in thru:
+        cal = IEEEP370_SE_NZC_2xThru(dummy_2xthru = t.network, name = '2xthru')
+        dm.append(cal)
+    dm_list = range(len(dm))
+    print(dm_list)
+    
+    for count_t, th  in enumerate(thru, start=0):
+        for i in range(len(dm)):
+            if i == count_t:
+                continue # skip this iteration of the for loop if the de-embedding protocol is being applied to the thru device it was generated from
+            # apply each deembedding to the thru device except for the one it was generated from
+            thru_TX = dm[i].deembed(th.network)
+            #store the error for each de-embedding protocol in the respective array index
+            error_value = np.abs(np.sum(thru_TX.s[:,1,0]))+np.abs(np.sum(thru_TX.s[:,0,1]))
+            total_error[i] += error_value #add the error for each de-embedding protocol applied to every thru to the total error for that protocol 
+                    
+            if plot_cal:
+                plt.figure(f'2x De-embedding')
+                th.network.plot_s_mag(m=1, n=0, color=colors[color_count], linestyle='dashed',label = f'Raw: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
+                thru_TX.plot_s_mag(m=1, n=0, color=colors[color_count], label = f'OS: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
                 color_count += 1
-            error.append(total_error)
-            print(total_error)
+            
+            
+    print(total_error)
     
     #Find the best de-embedding protocol
-    min_index = error.index(min(error))
-    max_index = error.index(max(error))
+    min_index = total_error.index(min(total_error))
+    max_index = total_error.index(max(total_error))
 
-    print(f"Best de-embedding protocol: dm[{min_index}]={min(error)}, worst = {max(error)}")
+    print(f"Best de-embedding protocol: dm[{min_index}]={min(total_error)}, worst = {max(total_error)}")
     
     #Plot the best de-embedding protocol
     if plot_cal:
@@ -202,7 +203,7 @@ def calibration_2x(s2p_files, thru, plot_cal = False):
 
 
 
-def keyplot(OS, dev, dev_selection = None, sub_set = None, y_range = None,
+def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = None,
             x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1], deembed_data = True):
     # Function to plot the data for the selected devices and states
     # A number of inputs are given default values so they can be omitted from the function input if not required as they are quite standard
@@ -237,7 +238,12 @@ def keyplot(OS, dev, dev_selection = None, sub_set = None, y_range = None,
         if key in dev: #extract the s2p files for the selected devices
             value = dev[key] 
             fig, ax = plt.subplots()
-            ax.set_title(f'{plot_type}: Device_{key}')
+            if deembed_data == True:
+                ax.set_title(f'{plot_type}: Device_{key} - deembedding: {cal_in.name}')
+                
+            else:
+                ax.set_title(f'{plot_type}: Device_{key}')
+                
             num_colors = sum(1 for r in value if subset_check(r)) #count the number of files that match the subset criteria to set the number of colors            
             #print(num_colors)
             colors = plt.cm.jet(np.linspace(0,1,num_colors))
@@ -250,7 +256,7 @@ def keyplot(OS, dev, dev_selection = None, sub_set = None, y_range = None,
                 if subset_check(r):
                     
                     if deembed_data == True:
-                        data = OS.deembed(r.network)
+                        data = cal_in.deembed(r.network)
                     else:
                         data = r.network
                         
@@ -303,6 +309,100 @@ def keyplot(OS, dev, dev_selection = None, sub_set = None, y_range = None,
 
 
 
+
+def subplot(dev_subs = [], cal_in = [], y_range = None,
+            x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1], deembed_data = True):
+    # Plotting function that takes an input of a dict of lists
+    # The dict items are the subsets of devices, e.g. pristine, formed, etc
+    # The lists are the devices that meet that criteria
+    # The function then plots all the devices in each subset on the same graph giving different line types to each subset
+    # and different colors within each subset for each device
+
+    plot_type = plot_type.lower() # removes case sensitivity for the plot type input (Smith/smith/SMITH... all work)
+    line_styles = ['-', '--', '-.', ':'] #list of line styles to cycle through for each plot
+    line_style_iterator = itertools.cycle(line_styles) #makes an iterator object that can be cyled through with next() to get the next line style
+ 
+    fig, ax = plt.subplots()   
+    if deembed_data == True:
+        ax.set_title(f'{plot_type} - deembedding: {cal_in.name}')            
+    else:
+        ax.set_title(f'{plot_type}')
+                
+    # Loop over the selected devices 
+    for subset in dev_subs:
+        line_obj = next(line_style_iterator) #get the first line style to pass as a plotting argument
+        num_colors = len(subset) # set number of colors to number of devices within the subset
+        colors = plt.cm.jet(np.linspace(0,1,num_colors))
+        color_count = 0 #initiate color count to cycle through the colors for each device in the subset
+            
+        for dev in subset:      
+
+            if deembed_data == True:
+                data = cal_in.deembed(dev.network)
+            else:
+                data = dev.network
+                
+            #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
+            data_sliced = data[x_range]
+
+            # Loop over the selected S-parameters to plot
+            for mm in m_port:
+                for nn in n_port:
+                    
+                    if plot_type == 'smith':
+                        data_sliced.plot_s_smith(m=mm,n=nn,draw_labels=True, color=colors[color_count],
+                                                            linestyle = line_obj, label = f'S_{mm}{nn} {dev.filename}')   
+                        
+                    elif plot_type == 'inputz':
+                        med_kernel = 23
+                        Z11 = medfilt(data_sliced.z_re[:, 0, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 0], kernel_size=med_kernel)
+                        Z12 = medfilt(data_sliced.z_re[:, 0, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 1], kernel_size=med_kernel)
+                        Z21 = medfilt(data_sliced.z_re[:, 1, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 0], kernel_size=med_kernel)
+                        Z22 = medfilt(data_sliced.z_re[:, 1, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 1], kernel_size=med_kernel)
+                        Z_load = 50
+
+                        # Calculate the input impedance
+                        z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
+                        z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
+                        #z_in = abs(Z11-Z12)
+                        #z_in = medfilt(z_in, kernel_size=17)
+                        ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
+                                linestyle = line_obj, label = f'Z_in_mag{plot_type}_{mm}{nn}: {dev.filename}') 
+                        # ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
+                        #         linestyle = line_obj, label = f'Z_out_mag{plot_type}_{mm}{nn}: {dev.filename}')
+                        
+                    else:
+                        p_data = getattr(data_sliced, plot_type)[:, mm-1, nn-1]
+                        #apply median filter to the data to smooth it
+                        p_data_smoothed = p_data#medfilt(p_data, kernel_size=23)
+                        
+                        ax.plot(data_sliced.f, p_data_smoothed, color=colors[color_count],
+                                linestyle = line_obj, label = f'{plot_type}_{mm}{nn}: {dev.filename}')   
+            color_count += 1 # change color for each file (needs to be inside the subset check loop so it only changes for the files that are plotted)
+
+            if log_x:
+                        ax.set_xscale('log')
+            if y_range is not None:
+                ax.set_ylim(y_range)          
+            ax.set_xlabel('Frequency (Hz)')
+            ax.set_ylabel('Magnitude (dB)')   
+            ax.legend(loc='upper right',fontsize='xx-small')
+    return fig, ax
+
+def subgen(s2p_files, run_nums = [[],[],[]]):
+    # Function taking all the s2p files and grouping them into a list of subsets, where each subset is itself a list of the s2p files
+    # The subsets can then be plotted in different colors/linetypes on the same graph
+    # Input option 1: run_nums is a list of lists, each list contains the run numbers for the subset of devices
+    # Input option 2: 
+    dev_subs = {}
+    dev_subs = []
+    for l in run_nums:
+        group = []
+        for n in l:
+            group.append(s2p_files[n])
+        dev_subs.append(group)
+    return dev_subs
+  
 
 
 
@@ -359,38 +459,43 @@ for s in s2p_files:
 print('open_short_thru',len(cal_open),len(cal_short),len(cal_thru))
  #whether to plot the de-embedding results
 OS = calibration_OS(cal_open, cal_short, cal_thru, plot_cal = False) #calibration object outputted from all the on wafer measurements
-TX = calibration_2x(s2p_files, cal_thru, plot_cal = False) #calibration object outputted from all the on wafer measurements
+TX = calibration_2x(cal_thru, plot_cal = False) #calibration object outputted from all the on wafer measurements
 
 #-------------------Plotting-------------------
 #def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
            # x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1]):        
 #'inputz' - plots the input impedance of the device
 
-x_range_input = "0.02-0.2ghz" #slice(0,-1)#
-y_range_input = None#[0,100]
-# fig_thru, ax_thru = keyplot(OS, dev, dev_selection = ['r10c1','r10c2','r10c3','r10c4'],sub_set = ['thru'], plot_type = 's_mag',
-#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
-# fig_thru2, ax_thru2 = keyplot(OS, dev, dev_selection = ['r10c1','r10c2','r10c3','r10c4'],sub_set = ['thru'], plot_type = 's_mag',
-#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
+x_range_input = slice(0,-1)#"0.02-0.8ghz" #
+y_range_input = None#[0,200]
+# def subplot(dev_subs = [], cal_in = [], y_range = None,
+#             x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1], deembed_data = True):
 
-fig_dev, ax_dev = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
-                                    log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
-fig_dev, ax_dev = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
-                                    log_x=False, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
+# def subgen(s2p_files, run_nums = [[],[],[]]):
 
-# fig_formed, ax_formed = keyplot(OS, dev, dev_selection = ['r1c4','r1c2'], plot_type = 'inputz',
-#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = True,y_range=y_range_input)
-
-# fig_formed2, ax_formed2 = keyplot(OS, dev, dev_selection = ['r1c4','r1c2'], plot_type = 'inputz',
-#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = False,y_range=y_range_input)
-
-
-
-# fig_comp2, ax_comp2 = keyplot(OS, dev, dev_selection = ['r2c1'],sub_set = ['c1_reset.','reset2','reset3','_set.','_set1', '_set2', ], plot_type = 'inputz',
-#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = False)
+dev_subs = subgen(s2p_files, run_nums =[[31,30,29,28,27,26,25,24,32,33,34,35,36,37,38,39,40,41], [47,42,50]   ] )
+fig_dc, ax_dc = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = 's_mag',
+                        log_x=True, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
+fig_dc2, ax_dc2 = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = 's_mag',
+                        log_x=True, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
 
 
 plt.show()
+
+
+
+# fig_dev, ax_dev = keyplot(dev, cal_in = OS, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
+#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
+# fig_dev, ax_dev = keyplot(dev, cal_in = TX, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
+#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
+# fig_dev, ax_dev = keyplot(dev, cal_in = TX, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
+#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
+
+
+
+
+
+
 
 #'_set','_set1', '_set2', '_set3','_set4', '_set5', '_set6','_set7', '_set8', '_set9',  formed_0dc','formed_pos0.0','c1_pristine.','pristine_pos0.2
 
