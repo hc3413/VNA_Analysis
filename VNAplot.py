@@ -19,7 +19,10 @@ import matplotlib.cm as cm
 import itertools
 import scipy
 from scipy.signal import medfilt
-
+import scipy.fft as fft
+import scipy.interpolate as interp
+import copy
+from scipy.signal import find_peaks
 
 
 # Define a class to store the VNA data alongside its ascociated with the filename, device index, and state
@@ -123,13 +126,14 @@ def calibration_OS(open, short, thru, plot_cal = False):
                 total_error += error_value #sum the error for each open/short pair over every thru device
                 color_count += 1
             error.append(total_error)
-            print(total_error)
+    
     
     #Find the best de-embedding protocol
+    print(error)
     min_index = error.index(min(error))
     max_index = error.index(max(error))
 
-    print(f"Best de-embedding protocol: dm[{min_index}]={min(error)}, worst = {max(error)}")
+    print(f"Best de-embedding protocol: dm[{min_index}] = {min(error)}, worst:dm[{max_index}] = {max(error)}")
     
     #Plot the best de-embedding protocol
     if plot_cal:
@@ -161,7 +165,6 @@ def calibration_2x(thru, plot_cal = False):
         cal = IEEEP370_SE_NZC_2xThru(dummy_2xthru = t.network, name = '2xthru')
         dm.append(cal)
     dm_list = range(len(dm))
-    print(dm_list)
     
     for count_t, th  in enumerate(thru, start=0):
         for i in range(len(dm)):
@@ -186,7 +189,7 @@ def calibration_2x(thru, plot_cal = False):
     min_index = total_error.index(min(total_error))
     max_index = total_error.index(max(total_error))
 
-    print(f"Best de-embedding protocol: dm[{min_index}]={min(total_error)}, worst = {max(total_error)}")
+    print(f"Best de-embedding protocol: dm[{min_index}] = {min(total_error)}, worst:dm[{max_index}] = {max(total_error)}")
     
     #Plot the best de-embedding protocol
     if plot_cal:
@@ -204,7 +207,7 @@ def calibration_2x(thru, plot_cal = False):
 
 
 def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = None,
-            x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1], deembed_data = True):
+            x_range = slice(0,-1), log_x = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True):
     # Function to plot the data for the selected devices and states
     # A number of inputs are given default values so they can be omitted from the function input if not required as they are quite standard
     # The default values also means that you can call them by name and not require the perfect ordring of the inputs
@@ -219,7 +222,7 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
     # m_port/n_port: S-parameter to plot - m/n = 2/1 -> S21; can pass multiple into list so m_port=[1,2] n_port=[1] will plot S11, S21
     # plot_type: Follows rf types so can be S, Z, Y, T, ABCD, or Smith with _db/_mag/_re/_im options for all except smith (e.g. S_db, Z_re, Smith)
 
-
+    figs_axes = [] #initialize an empty list to store the figure and axis objects
     plot_type = plot_type.lower() # removes case sensitivity for the plot type input (Smith/smith/SMITH... all work)
    
     # If no devices are selected then plot all devices stored in dev
@@ -232,162 +235,205 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
     # Else check if the filename contains any of the sub_set strings returning true/false to plot/not plot
     else:
         subset_check = lambda x: any(m in x.filename.lower() for m in sub_set)
-   
-    # Loop over the selected devices    
-    for key in dev_selection:
-        if key in dev: #extract the s2p files for the selected devices
-            value = dev[key] 
-            fig, ax = plt.subplots()
-            if deembed_data == True:
-                ax.set_title(f'{plot_type}: Device_{key} - deembedding: {cal_in.name}')
-                
-            else:
-                ax.set_title(f'{plot_type}: Device_{key}')
-                
-            num_colors = sum(1 for r in value if subset_check(r)) #count the number of files that match the subset criteria to set the number of colors            
-            #print(num_colors)
-            colors = plt.cm.jet(np.linspace(0,1,num_colors))
-            color_count = 0
-            line_styles = ['-', '--', '-.', ':'] #list of line styles to cycle through for each plot
-            line_style_iterator = itertools.cycle(line_styles) #makes an iterator object that can be cyled through with next() to get the next line style
-
-            # Loop over the s2p files for each select device plotting all that match the subset criteria
-            for r in value:
-                if subset_check(r):
+    
+    # Loop entire plotting function over the selected plot types
+    for p_type in plot_type:  
+          
+        # Loop over the selected devices    
+        for key in dev_selection:
+            if key in dev: #extract the s2p files for the selected devices
+                value = dev[key] 
+                fig, ax = plt.subplots()
+                if deembed_data == True:
+                    ax.set_title(f'{p_type}: Device_{key} - deembedding: {cal_in.name}')
                     
-                    if deembed_data == True:
-                        data = cal_in.deembed(r.network)
-                    else:
-                        data = r.network
+                else:
+                    ax.set_title(f'{p_type}: Device_{key}')
+                    
+                num_colors = sum(1 for r in value if subset_check(r)) #count the number of files that match the subset criteria to set the number of colors            
+                #print(num_colors)
+                colors = plt.cm.jet(np.linspace(0,1,num_colors))
+                color_count = 0
+                line_styles = ['-', '--', '-.', ':'] #list of line styles to cycle through for each plot
+                line_style_iterator = itertools.cycle(line_styles) #makes an iterator object that can be cyled through with next() to get the next line style
+
+                # Loop over the s2p files for each select device plotting all that match the subset criteria
+                for r in value:
+                    if subset_check(r):
                         
-                    #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
-                    data_sliced = data[x_range]
-
-                    # Loop over the selected S-parameters to plot
-                    for mm in m_port:
-                        for nn in n_port:
+                        if deembed_data == True:
+                            data = cal_in.deembed(r.network)
+                        else:
+                            data = r.network
                             
-                            if plot_type == 'smith':
-                                data_sliced.plot_s_smith(m=mm,n=nn,draw_labels=True, color=colors[color_count],
-                                                                    linestyle = next(line_style_iterator), label = f'S_{mm}{nn} {r.filename}')   
-                                
-                            elif plot_type == 'inputz':
-                                med_kernel = 23
-                                Z11 = medfilt(data_sliced.z_re[:, 0, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 0], kernel_size=med_kernel)
-                                Z12 = medfilt(data_sliced.z_re[:, 0, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 1], kernel_size=med_kernel)
-                                Z21 = medfilt(data_sliced.z_re[:, 1, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 0], kernel_size=med_kernel)
-                                Z22 = medfilt(data_sliced.z_re[:, 1, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 1], kernel_size=med_kernel)
-                                Z_load = 50
+                        #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
+                        data_sliced = data[x_range]
 
-                                # Calculate the input impedance
-                                z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
-                                z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
-                                #z_in = abs(Z11-Z12)
-                                #z_in = medfilt(z_in, kernel_size=17)
-                                ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
-                                        linestyle = next(line_style_iterator), label = f'Z_in_mag{plot_type}_{mm}{nn}: {r.filename}') 
-                                ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
-                                        linestyle = next(line_style_iterator), label = f'Z_out_mag{plot_type}_{mm}{nn}: {r.filename}')
+                        # Loop over the selected S-parameters to plot
+                        for mm in m_port:
+                            for nn in n_port:
                                 
-                            else:
-                                p_data = getattr(data_sliced, plot_type)[:, mm-1, nn-1]
-                                #apply median filter to the data to smooth it
-                                p_data_smoothed = p_data#medfilt(p_data, kernel_size=23)
-                                
-                                ax.plot(data_sliced.f, p_data_smoothed, color=colors[color_count],
-                                        linestyle = next(line_style_iterator), label = f'{plot_type}_{mm}{nn}: {r.filename}')   
-                    color_count += 1 # change color for each file (needs to be inside the subset check loop so it only changes for the files that are plotted)
- 
-            if log_x:
-                        ax.set_xscale('log')
-            if y_range is not None:
-                ax.set_ylim(y_range)          
-            ax.set_xlabel('Frequency (Hz)')
-            ax.set_ylabel('Magnitude (dB)')   
-            ax.legend(loc='upper right',fontsize='xx-small')
-    return fig, ax
+                                if p_type == 'smith':
+                                    data_sliced.plot_s_smith(m=mm,n=nn,draw_labels=True, color=colors[color_count],
+                                                                        linestyle = next(line_style_iterator), label = f'S_{mm}{nn} {r.filename}')   
+                                    
+                                elif p_type == 'inputz':
+                                    med_kernel = 23
+                                    Z11 = medfilt(data_sliced.z_re[:, 0, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 0], kernel_size=med_kernel)
+                                    Z12 = medfilt(data_sliced.z_re[:, 0, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 1], kernel_size=med_kernel)
+                                    Z21 = medfilt(data_sliced.z_re[:, 1, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 0], kernel_size=med_kernel)
+                                    Z22 = medfilt(data_sliced.z_re[:, 1, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 1], kernel_size=med_kernel)
+                                    Z_load = 50
+
+                                    # Calculate the input impedance
+                                    z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
+                                    z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
+                                    #z_in = abs(Z11-Z12)
+                                    #z_in = medfilt(z_in, kernel_size=17)
+                                    ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
+                                            linestyle = '-', label = f'Z_in_mag{p_type}_{mm}{nn}: {r.filename}') 
+                                    ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
+                                            linestyle = ':', label = f'Z_out_mag{pp_type}_{mm}{nn}: {r.filename}')
+                                    
+                                elif p_type == 'power':
+                                    forward_power = np.square(np.abs(data_sliced.s[:,0,0])) + np.square(np.abs(data_sliced.s[:,0,1]))
+                                    reverse_power = np.square(np.abs(data_sliced.s[:,1,0])) + np.square(np.abs(data_sliced.s[:,1,1]))
+                                    
+                                    ax.plot(data_sliced.f, forward_power, color=colors[color_count],
+                                            linestyle = '-', label = f'Forward_power_mag{p_type}_{mm}{nn}: {r.filename}') 
+                                    ax.plot(data_sliced.f, reverse_power, color=colors[color_count],
+                                            linestyle = ':', label = f'Reverse_power_mag{p_type}_{mm}{nn}: {r.filename}')
+                                        
+                                else:
+                                    p_data = getattr(data_sliced, p_type)[:, mm-1, nn-1]
+                                    #apply median filter to the data to smooth it
+                                    p_data_smoothed = p_data#medfilt(p_data, kernel_size=23)
+                                    
+                                    ax.plot(data_sliced.f, p_data_smoothed, color=colors[color_count],
+                                            linestyle = next(line_style_iterator), label = f'{p_type}_{mm}{nn}: {r.filename}')   
+                        color_count += 1 # change color for each file (needs to be inside the subset check loop so it only changes for the files that are plotted)
+    
+                if log_x:
+                            ax.set_xscale('log')
+                if y_range is not None:
+                    ax.set_ylim(y_range)          
+                ax.set_xlabel('Frequency (Hz)')
+                if p_type == 's_db':
+                    ax.set_ylabel('Magnitude (dB)')
+                else:
+                    ax.set_ylabel('Magnitude')   
+                ax.legend(loc='upper right',fontsize='xx-small')
+        figs_axes.append((fig, ax))
+    return figs_axes
 
 
 
 
 def subplot(dev_subs = [], cal_in = [], y_range = None,
-            x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1], deembed_data = True):
+            x_range = slice(0,-1), log_x = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True, iterate_lines = False):
     # Plotting function that takes an input of a dict of lists
     # The dict items are the subsets of devices, e.g. pristine, formed, etc
     # The lists are the devices that meet that criteria
     # The function then plots all the devices in each subset on the same graph giving different line types to each subset
     # and different colors within each subset for each device
-
-    plot_type = plot_type.lower() # removes case sensitivity for the plot type input (Smith/smith/SMITH... all work)
+    figs_axes = [] #initialize an empty list to store the figure and axis objects
     line_styles = ['-', '--', '-.', ':'] #list of line styles to cycle through for each plot
     line_style_iterator = itertools.cycle(line_styles) #makes an iterator object that can be cyled through with next() to get the next line style
- 
-    fig, ax = plt.subplots()   
-    if deembed_data == True:
-        ax.set_title(f'{plot_type} - deembedding: {cal_in.name}')            
-    else:
-        ax.set_title(f'{plot_type}')
-                
+    color_maps = ['binary','winter','autumn','Greens', 'Purples','Blues', 'Oranges',
+            'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu',
+            'GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn','Reds'] #list of sequential color maps to cycle through for each subset
+    
+    
+    # Loop entire plotting function over the selected plot types
+    for p_type in plot_type: 
+        p_type = p_type.lower() # removes case sensitivity for the plot type input (Smith/smith/SMITH... all work)
+        fig, ax = plt.subplots()   
+        color_map_iterator = itertools.cycle(color_maps) #makes an iterator object that can be cyled through with next() to get the next color map
+        if deembed_data == True:
+            ax.set_title(f'{p_type} - deembedding: {cal_in.name}')            
+        else:
+            ax.set_title(f'{p_type}')     
+              
     # Loop over the selected devices 
-    for subset in dev_subs:
-        line_obj = next(line_style_iterator) #get the first line style to pass as a plotting argument
-        num_colors = len(subset) # set number of colors to number of devices within the subset
-        colors = plt.cm.jet(np.linspace(0,1,num_colors))
-        color_count = 0 #initiate color count to cycle through the colors for each device in the subset
-            
-        for dev in subset:      
-
-            if deembed_data == True:
-                data = cal_in.deembed(dev.network)
-            else:
-                data = dev.network
+        for subset in dev_subs:
+            if iterate_lines == True:
+                line_obj = next(line_style_iterator) #get the first line style to pass as a plotting argument
+            else:   
+                line_obj = '-'  # Always return the first object in the line_style_iterator
                 
-            #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
-            data_sliced = data[x_range]
+            color_obj = next(color_map_iterator) #get the first color map to pass as a plotting argument
+            
+            num_colors = len(subset) # set number of colors to number of devices within the subset
+            colors = plt.get_cmap(color_obj)(np.linspace(0.2,1,num_colors))
+            color_count = 0 #initiate color count to cycle through the colors for each device in the subset
+                
+            for dev in subset:      
 
-            # Loop over the selected S-parameters to plot
-            for mm in m_port:
-                for nn in n_port:
+                if deembed_data == True:
+                    data = cal_in.deembed(dev.network)
+                else:
+                    data = dev.network
                     
-                    if plot_type == 'smith':
-                        data_sliced.plot_s_smith(m=mm,n=nn,draw_labels=True, color=colors[color_count],
-                                                            linestyle = line_obj, label = f'S_{mm}{nn} {dev.filename}')   
-                        
-                    elif plot_type == 'inputz':
-                        med_kernel = 23
-                        Z11 = medfilt(data_sliced.z_re[:, 0, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 0], kernel_size=med_kernel)
-                        Z12 = medfilt(data_sliced.z_re[:, 0, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 1], kernel_size=med_kernel)
-                        Z21 = medfilt(data_sliced.z_re[:, 1, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 0], kernel_size=med_kernel)
-                        Z22 = medfilt(data_sliced.z_re[:, 1, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 1], kernel_size=med_kernel)
-                        Z_load = 50
+                #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
+                data_sliced = data[x_range]
 
-                        # Calculate the input impedance
-                        z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
-                        z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
-                        #z_in = abs(Z11-Z12)
-                        #z_in = medfilt(z_in, kernel_size=17)
-                        ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
-                                linestyle = line_obj, label = f'Z_in_mag{plot_type}_{mm}{nn}: {dev.filename}') 
-                        # ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
-                        #         linestyle = line_obj, label = f'Z_out_mag{plot_type}_{mm}{nn}: {dev.filename}')
+                # Loop over the selected S-parameters to plot
+                for mm in m_port:
+                    for nn in n_port:
                         
-                    else:
-                        p_data = getattr(data_sliced, plot_type)[:, mm-1, nn-1]
-                        #apply median filter to the data to smooth it
-                        p_data_smoothed = p_data#medfilt(p_data, kernel_size=23)
-                        
-                        ax.plot(data_sliced.f, p_data_smoothed, color=colors[color_count],
-                                linestyle = line_obj, label = f'{plot_type}_{mm}{nn}: {dev.filename}')   
-            color_count += 1 # change color for each file (needs to be inside the subset check loop so it only changes for the files that are plotted)
+                        if p_type == 'smith':
+                            data_sliced.plot_s_smith(m=mm,n=nn,draw_labels=True, color=colors[color_count],
+                                                                linestyle = line_obj, label = f'S_{mm}{nn} {dev.filename}')   
+                            
+                        elif p_type == 'inputz':
+                            med_kernel = 23
+                            Z11 = medfilt(data_sliced.z_re[:, 0, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 0], kernel_size=med_kernel)
+                            Z12 = medfilt(data_sliced.z_re[:, 0, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 1], kernel_size=med_kernel)
+                            Z21 = medfilt(data_sliced.z_re[:, 1, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 0], kernel_size=med_kernel)
+                            Z22 = medfilt(data_sliced.z_re[:, 1, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 1], kernel_size=med_kernel)
+                            Z_load = 50
 
-            if log_x:
-                        ax.set_xscale('log')
-            if y_range is not None:
-                ax.set_ylim(y_range)          
-            ax.set_xlabel('Frequency (Hz)')
-            ax.set_ylabel('Magnitude (dB)')   
-            ax.legend(loc='upper right',fontsize='xx-small')
-    return fig, ax
+                            # Calculate the input impedance
+                            z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
+                            z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
+                            #z_in = abs(Z11-Z12)
+                            #z_in = medfilt(z_in, kernel_size=17)
+                            ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
+                                    linestyle = '-', label = f'Z_in_mag{p_type}_{mm}{nn}: {dev.filename}') 
+                            ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
+                                    linestyle = ':', label = f'Z_out_mag{p_type}_{mm}{nn}: {dev.filename}')
+                            
+                        elif p_type == 'power':
+                                    forward_power = np.square(np.abs(data_sliced.s[:,0,0])) + np.square(np.abs(data_sliced.s[:,0,1]))
+                                    reverse_power = np.square(np.abs(data_sliced.s[:,1,0])) + np.square(np.abs(data_sliced.s[:,1,1]))
+                                    
+                                    ax.plot(data_sliced.f, forward_power, color=colors[color_count],
+                                            linestyle = '-', label = f'Forward_power_mag{p_type}: {dev.filename}') 
+                                    ax.plot(data_sliced.f, reverse_power, color=colors[color_count],
+                                            linestyle = ':', label = f'Reverse_power_mag{p_type}: {dev.filename}')
+                                
+                        
+                        else:
+                            p_data = getattr(data_sliced, p_type)[:, mm-1, nn-1]
+                            #apply median filter to the data to smooth it
+                            p_data_smoothed = p_data#medfilt(p_data, kernel_size=23)
+                            
+                            ax.plot(data_sliced.f, p_data_smoothed, color=colors[color_count],
+                                    linestyle = line_obj, label = f'{p_type}_{mm}{nn}: {dev.filename}')   
+                color_count += 1 # change color for each file (needs to be inside the subset check loop so it only changes for the files that are plotted)
+
+                if log_x:
+                            ax.set_xscale('log')
+                if y_range is not None:
+                    ax.set_ylim(y_range)          
+                ax.set_xlabel('Frequency (Hz)')
+                if p_type == 's_db':
+                    ax.set_ylabel('Magnitude (dB)')
+                else:
+                    ax.set_ylabel('Magnitude')   
+                ax.legend(loc='upper right',fontsize='xx-small')
+        figs_axes.append((fig, ax))
+    return figs_axes
 
 def subgen(s2p_files, run_nums = [[],[],[]]):
     # Function taking all the s2p files and grouping them into a list of subsets, where each subset is itself a list of the s2p files
@@ -399,10 +445,61 @@ def subgen(s2p_files, run_nums = [[],[],[]]):
     for l in run_nums:
         group = []
         for n in l:
-            group.append(s2p_files[n])
+            group.append(s2p_files[n-1]) #subtract 1 from the run number due to zero indexing in python
         dev_subs.append(group)
     return dev_subs
-  
+
+def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8]):
+    # Function to apply a fourier filter to the data to remove noise - is applied to the list of all the files so it can be the first step in the analysis
+    # The threshold is the frequency above which the noise is removed
+    # The function then returns the filtered data back into the list of s2p files
+    
+    sum_freqs = np.zeros(len(s2p_files_copy[0].network.f)) # Initiating an empty numpy array same size as the data to store the sum of all the FFT's to find common peaks that could be systematic
+    sum_freqs_filtered = np.zeros(len(s2p_files_copy[0].network.f)) # Initiating an empty numpy array same size as the data to store the filtered FFt's to compare
+    for s in s2p_files_copy:
+        for n in range(1,3):
+            for m in range(1,3):
+                # Extract the s-parameters
+                s_params = s.network.s[:,m-1,n-1]
+                
+                # Interpolate the data onto a uniform grid
+                f_uniform = np.linspace(s.network.f.min(), s.network.f.max(), len(s.network.f))
+                interp_func = interp.interp1d(s.network.f, s_params)
+                s_params_uniform = interp_func(f_uniform)
+                
+                # Perform the Fourier transform
+                fourier = fft.fft(s_params_uniform)
+                
+                # Generate the frequencies for the Fourier transform
+                freqs = fft.fftfreq(len(s_params_uniform), d=f_uniform[1] - f_uniform[0])
+
+                # Compute the amplitudes
+                amplitudes = np.abs(fourier)
+                sum_freqs += amplitudes
+
+                # Apply the bandstop filter adn plot the filtered data
+                filtered_fourier = np.copy(fourier)
+                filtered_fourier[(np.abs(freqs) > threshold[0]) & (np.abs(freqs) < threshold[1])] = 0
+                sum_freqs_filtered += np.abs(filtered_fourier)
+                
+                # Perform the inverse Fourier transform
+                filtered_s_params = fft.ifft(filtered_fourier)
+
+                # Interpolate the filtered data back onto the original frequency grid
+                interp_func = interp.interp1d(f_uniform, filtered_s_params)
+                filtered_s_params_original = interp_func(s.network.f)
+
+                # Write the filtered s-parameters back into the original data
+                s.network.s[:,m-1,n-1] = filtered_s_params_original
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(freqs,sum_freqs, color='blue',linestyle =':')
+    plt.plot(freqs,sum_freqs_filtered, color='green')
+    for t in threshold:
+                        plt.axvline(x=t, color='red')
+                        plt.axvline(x=-t, color='red')
+    plt.yscale('log')
+    return s2p_files_copy
 
 
 
@@ -416,7 +513,7 @@ directory = ('/Users/horatiocox/Desktop/VNA_Analysis/CPW_mem_oscillator_220524/M
 s2p_files = import_data(directory)
 # remove duplicate frequency points from all the thru data to prevent errors with skrf functions
 for f in s2p_files:
-    print(f.filename,f.run, f.label)
+    print(f.run,f.label,f.filename)
     indx = f.network.frequency.drop_non_monotonic_increasing()
     # Remove the corresponding entries from the s-parameters array
     unique_s = np.delete(f.network.s, indx, axis=0)
@@ -427,21 +524,25 @@ for f in s2p_files:
     
 
 
+
+## Step 1 - fourier filter the initial files to remove noise
+s2p_filt = copy.deepcopy(s2p_files)
+s2p_filt = fourier_filter(s2p_filt, threshold = [1.8e-8,2.2e-8]) #apply to deepcopy to avoid modifying the original data
+dev_subs = subgen(s2p_files, run_nums =[[1,2,3,4,5,6], [31,27,23,35,39,41], [47,42,50]   ] )
+dev_subs_filt = subgen(s2p_filt, run_nums =[[1,2,3,4,5,6], [31,27,23,35,39,41], [47,42,50]   ] )
+#dev_subs = subgen(s2p_files, run_nums =[[1,2], [23], [42]   ] )
+
+
 #-------------------Grouping-------------------
 # Select the On Wafer Calibration files to be used
-ISS_thru = [s for s in s2p_files if s.state == 'thru' and s.wafer_number == 0]
-cal_thru = [s for s in s2p_files if s.state == 'thru' and s.wafer_number != 0]
-cal_open = [s for s in s2p_files if s.state == 'open' or s.state == 'opensig']# or s.state == 'opennarrow' or s.state == 'openverynarrow']
-cal_short = [s for s in s2p_files if s.state == 'short']
-
-
-# Clean the thru data to remove duplicate frequency points
-
-
+ISS_thru = [s for s in s2p_filt if s.state == 'thru' and s.wafer_number == 0]
+cal_thru = [s for s in s2p_filt if s.state == 'thru' and s.wafer_number != 0]
+cal_open = [s for s in s2p_filt if s.state == 'open' or s.state == 'opensig']# or s.state == 'opennarrow' or s.state == 'openverynarrow']
+cal_short = [s for s in s2p_filt if s.state == 'short']
     
 # Group files by their state so I can plot and compare states
-pristine = [s for s in s2p_files if s.state == 'pristine']
-formed = [s for s in s2p_files if s.state in ['formed', 'smallform', 'fullform']]
+pristine = [s for s in s2p_filt if s.state == 'pristine']
+formed = [s for s in s2p_filt if s.state in ['formed', 'smallform', 'fullform']]
 
 # Group files with the same [r_number, c_number] values together so I can plot each device in all its states on one graph
 # Stores a list of S2PFile objects for each device in a dictionary, "dev", with the key being the device's [r_number, c_number] values
@@ -455,29 +556,50 @@ for s in s2p_files:
         dev[key] = [s]
 
 
+
+
 #-------------------De-Embedding-------------------
 print('open_short_thru',len(cal_open),len(cal_short),len(cal_thru))
  #whether to plot the de-embedding results
 OS = calibration_OS(cal_open, cal_short, cal_thru, plot_cal = False) #calibration object outputted from all the on wafer measurements
 TX = calibration_2x(cal_thru, plot_cal = False) #calibration object outputted from all the on wafer measurements
 
+
+
 #-------------------Plotting-------------------
 #def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
            # x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1]):        
 #'inputz' - plots the input impedance of the device
 
-x_range_input = slice(0,-1)#"0.02-0.8ghz" #
-y_range_input = None#[0,200]
+x_range_input = "0.1-20ghz"#slice(0,-1)#"0.02-0.8ghz" #
+y_range_input = [0,200]#None#[0,200]
 # def subplot(dev_subs = [], cal_in = [], y_range = None,
 #             x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1], deembed_data = True):
 
 # def subgen(s2p_files, run_nums = [[],[],[]]):
 
-dev_subs = subgen(s2p_files, run_nums =[[31,30,29,28,27,26,25,24,32,33,34,35,36,37,38,39,40,41], [47,42,50]   ] )
-fig_dc, ax_dc = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = 's_mag',
+
+
+
+# fig1 = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = ['power', 'inputz', 'S_db'],
+#                         log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
+# fig2 = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = ['power', 'inputz', 'S_db'],
+#                         log_x=False, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input)
+
+
+fig3 = subplot(dev_subs = dev_subs_filt, cal_in = TX, plot_type = ['inputz'],
                         log_x=True, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
-fig_dc2, ax_dc2 = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = 's_mag',
+fig3 = subplot(dev_subs = dev_subs_filt, cal_in = OS, plot_type = ['inputz'],
+                        log_x=True, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
+fig4 = subplot(dev_subs = dev_subs_filt, cal_in = OS, plot_type = ['inputz'],
                         log_x=True, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
+
+
+
+# fig_dc, ax_dc = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = 'inputz',
+#                         log_x=True, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
+# fig_dc2, ax_dc2 = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = 'inputz',
+#                         log_x=True, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
 
 
 plt.show()
