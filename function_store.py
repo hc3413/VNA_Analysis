@@ -1,13 +1,8 @@
-#source VNAenv/bin/activate (launching and exiting the virtual environment containing the required modules, stored in the working directory for VNA_Analysis)
-#VNAenv/bin/python your_script.py - for running a script in the virtual environment
-#source deactivate
-
 import numpy as np
 import pandas as pd
 import skrf as rf
 from skrf.calibration import OpenShort, SplitTee, AdmittanceCancel
 from skrf.calibration import IEEEP370_SE_NZC_2xThru
-
 import matplotlib.pyplot as plt
 import os
 import datetime
@@ -23,6 +18,8 @@ import scipy.fft as fft
 import scipy.interpolate as interp
 import copy
 from scipy.signal import find_peaks
+from scipy.linalg import sqrtm
+
 
 
 # Define a class to store the VNA data alongside its ascociated with the filename, device index, and state
@@ -97,6 +94,19 @@ def import_data(data_path: str):
         run_count += 1
     return s2p_files
 
+
+#--------------------------------------------------------------------------------
+def duplicate_check(s2p_files):
+    for f in s2p_files:
+        print(f.run,f.label,f.filename)
+        indx = f.network.frequency.drop_non_monotonic_increasing()
+        # Remove the corresponding entries from the s-parameters array
+        unique_s = np.delete(f.network.s, indx, axis=0)
+        unique_z0 = np.delete(f.network.z0, indx, axis=0)
+        # Assign the unique s-parameters array back to the network object
+        f.network.s = unique_s
+        f.network.z0 = unique_z0
+    return s2p_files
 
 def calibration_OS(open, short, thru, plot_cal = False):
     # Function to generate an OpenShort De-embedding calibration and apply it to the on-wafer thru measurements
@@ -211,7 +221,7 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
     # Function to plot the data for the selected devices and states
     # A number of inputs are given default values so they can be omitted from the function input if not required as they are quite standard
     # The default values also means that you can call them by name and not require the perfect ordring of the inputs
-    # Plot type can be S, Z, Y, T, ABCD, or Smith
+    # Plot type can be S, Z, Y, T, ABCD, or Smith from defauls - I have added linez, inputz, and power to calculate the input impedance,line impedance, and power
     #x_range: slice the data to remove the low frequency noise - default = no slicing - input form should be either '10-20ghz' or slice(1:10) for the first 10 points
     #         slightly different to y range as we are slicing the data object instead of changing the range of the plot. 
     #         necessary to generalise for the smith chart where you can't change axis limits to do this
@@ -277,7 +287,7 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
                                     data_sliced.plot_s_smith(m=mm,n=nn,draw_labels=True, color=colors[color_count],
                                                                         linestyle = next(line_style_iterator), label = f'S_{mm}{nn} {r.filename}')   
                                     
-                                elif p_type == 'inputz':
+                                elif p_type == 'inputz' or p_type == 'linez':
                                     med_kernel = 23
                                     Z11 = medfilt(data_sliced.z_re[:, 0, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 0], kernel_size=med_kernel)
                                     Z12 = medfilt(data_sliced.z_re[:, 0, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 1], kernel_size=med_kernel)
@@ -285,15 +295,18 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
                                     Z22 = medfilt(data_sliced.z_re[:, 1, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 1], kernel_size=med_kernel)
                                     Z_load = 50
 
-                                    # Calculate the input impedance
-                                    z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
-                                    z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
-                                    #z_in = abs(Z11-Z12)
-                                    #z_in = medfilt(z_in, kernel_size=17)
-                                    ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
-                                            linestyle = '-', label = f'Z_in_mag{p_type}_{mm}{nn}: {r.filename}') 
-                                    ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
-                                            linestyle = ':', label = f'Z_out_mag{pp_type}_{mm}{nn}: {r.filename}')
+                                    if p_type == 'inputz':
+                                        # Calculate the input impedance
+                                        z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
+                                        z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
+                                        ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
+                                                linestyle = '-', label = f'Z_in_mag{p_type}_{mm}{nn}: {dev.filename}') 
+                                        ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
+                                                linestyle = ':', label = f'Z_out_mag{p_type}_{mm}{nn}: {dev.filename}')
+                                    elif p_type == 'linez':
+                                        z_line = abs(Z11-Z12) + abs(Z22-Z12)
+                                        ax.plot(data_sliced.f, z_line, color=colors[color_count],
+                                            linestyle = '-', label = f'Z_line_mag{p_type}_{mm}{nn}: {dev.filename}') 
                                     
                                 elif p_type == 'power':
                                     forward_power = np.square(np.abs(data_sliced.s[:,0,0])) + np.square(np.abs(data_sliced.s[:,0,1]))
@@ -329,13 +342,15 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
 
 
 
-def subplot(dev_subs = [], cal_in = [], y_range = None,
+def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             x_range = slice(0,-1), log_x = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True, iterate_lines = False):
     # Plotting function that takes an input of a dict of lists
     # The dict items are the subsets of devices, e.g. pristine, formed, etc
     # The lists are the devices that meet that criteria
     # The function then plots all the devices in each subset on the same graph giving different line types to each subset
     # and different colors within each subset for each device
+    # Plot type can be S, Z, Y, T, ABCD, or Smith from defauls - I have added linez, inputz, and power to calculate the input impedance,line impedance, and power
+    
     figs_axes = [] #initialize an empty list to store the figure and axis objects
     line_styles = ['-', '--', '-.', ':'] #list of line styles to cycle through for each plot
     line_style_iterator = itertools.cycle(line_styles) #makes an iterator object that can be cyled through with next() to get the next line style
@@ -347,7 +362,7 @@ def subplot(dev_subs = [], cal_in = [], y_range = None,
     # Loop entire plotting function over the selected plot types
     for p_type in plot_type: 
         p_type = p_type.lower() # removes case sensitivity for the plot type input (Smith/smith/SMITH... all work)
-        fig, ax = plt.subplots()   
+        #fig, ax = plt.subplots()   
         color_map_iterator = itertools.cycle(color_maps) #makes an iterator object that can be cyled through with next() to get the next color map
         if deembed_data == True:
             ax.set_title(f'{p_type} - deembedding: {cal_in.name}')            
@@ -355,7 +370,7 @@ def subplot(dev_subs = [], cal_in = [], y_range = None,
             ax.set_title(f'{p_type}')     
               
     # Loop over the selected devices 
-        for subset in dev_subs:
+        for subset in dev_subset:
             if iterate_lines == True:
                 line_obj = next(line_style_iterator) #get the first line style to pass as a plotting argument
             else:   
@@ -385,7 +400,7 @@ def subplot(dev_subs = [], cal_in = [], y_range = None,
                             data_sliced.plot_s_smith(m=mm,n=nn,draw_labels=True, color=colors[color_count],
                                                                 linestyle = line_obj, label = f'S_{mm}{nn} {dev.filename}')   
                             
-                        elif p_type == 'inputz':
+                        elif p_type == 'inputz' or p_type == 'linez':
                             med_kernel = 23
                             Z11 = medfilt(data_sliced.z_re[:, 0, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 0], kernel_size=med_kernel)
                             Z12 = medfilt(data_sliced.z_re[:, 0, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 1], kernel_size=med_kernel)
@@ -393,15 +408,19 @@ def subplot(dev_subs = [], cal_in = [], y_range = None,
                             Z22 = medfilt(data_sliced.z_re[:, 1, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 1, 1], kernel_size=med_kernel)
                             Z_load = 50
 
-                            # Calculate the input impedance
-                            z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
-                            z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
-                            #z_in = abs(Z11-Z12)
-                            #z_in = medfilt(z_in, kernel_size=17)
-                            ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
-                                    linestyle = '-', label = f'Z_in_mag{p_type}_{mm}{nn}: {dev.filename}') 
-                            ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
-                                    linestyle = ':', label = f'Z_out_mag{p_type}_{mm}{nn}: {dev.filename}')
+                            if p_type == 'inputz':
+                                # Calculate the input impedance
+                                z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
+                                z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
+                                ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
+                                        linestyle = '-', label = f'Z_in_mag{p_type}_{mm}{nn}: {dev.filename}') 
+                                ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
+                                        linestyle = ':', label = f'Z_out_mag{p_type}_{mm}{nn}: {dev.filename}')
+                            elif p_type == 'linez':
+                                z_line = abs(Z11-Z12) + abs(Z22-Z12)
+                                ax.plot(data_sliced.f, z_line, color=colors[color_count],
+                                    linestyle = '-', label = f'Z_line_mag{p_type}_{mm}{nn}: {dev.filename}') 
+                                
                             
                         elif p_type == 'power':
                                     forward_power = np.square(np.abs(data_sliced.s[:,0,0])) + np.square(np.abs(data_sliced.s[:,0,1]))
@@ -432,8 +451,8 @@ def subplot(dev_subs = [], cal_in = [], y_range = None,
                 else:
                     ax.set_ylabel('Magnitude')   
                 ax.legend(loc='upper right',fontsize='xx-small')
-        figs_axes.append((fig, ax))
-    return figs_axes
+        #figs_axes.append((fig, ax))
+    #return figs_axes
 
 def subgen(s2p_files, run_nums = [[],[],[]]):
     # Function taking all the s2p files and grouping them into a list of subsets, where each subset is itself a list of the s2p files
@@ -459,6 +478,7 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8]):
     for s in s2p_files_copy:
         for n in range(1,3):
             for m in range(1,3):
+                
                 # Extract the s-parameters
                 s_params = s.network.s[:,m-1,n-1]
                 
@@ -477,9 +497,10 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8]):
                 amplitudes = np.abs(fourier)
                 sum_freqs += amplitudes
 
-                # Apply the bandstop filter adn plot the filtered data
+                # Loop over the list of thresholds applying one or multiple bandstop filters to the Fourier transform
                 filtered_fourier = np.copy(fourier)
-                filtered_fourier[(np.abs(freqs) > threshold[0]) & (np.abs(freqs) < threshold[1])] = 0
+                for thr in threshold:
+                    filtered_fourier[(np.abs(freqs) > thr[0]) & (np.abs(freqs) < thr[1])] = 0
                 sum_freqs_filtered += np.abs(filtered_fourier)
                 
                 # Perform the inverse Fourier transform
@@ -492,160 +513,232 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8]):
                 # Write the filtered s-parameters back into the original data
                 s.network.s[:,m-1,n-1] = filtered_s_params_original
 
+        # Change the label to indicate the data has been filtered
+        s.filename = s.filename[0:-4] + '_FFT_filtered'
+
     plt.figure(figsize=(10, 5))
     plt.plot(freqs,sum_freqs, color='blue',linestyle =':')
     plt.plot(freqs,sum_freqs_filtered, color='green')
-    for t in threshold:
-                        plt.axvline(x=t, color='red')
-                        plt.axvline(x=-t, color='red')
+    for thr in threshold:
+        for t in thr:
+            plt.axvline(x=t, color='red')
+            plt.axvline(x=-t, color='red')
     plt.yscale('log')
     return s2p_files_copy
 
 
 
-# Define the path to the directory containing the VNA data
-#directory = ('/Users/horatiocox/Desktop/VNA_Analysis/mag_angle_260424/')
 
-directory = ('/Users/horatiocox/Desktop/VNA_Analysis/CPW_mem_oscillator_220524/Memristor/')
-#directory = ('/Users/horatiocox/Desktop/VNA_Analysis/CPW_mem_oscillator_220524/Oscillator/')
-
-# Import the data from the VNA files
-s2p_files = import_data(directory)
-# remove duplicate frequency points from all the thru data to prevent errors with skrf functions
-for f in s2p_files:
-    print(f.run,f.label,f.filename)
-    indx = f.network.frequency.drop_non_monotonic_increasing()
-    # Remove the corresponding entries from the s-parameters array
-    unique_s = np.delete(f.network.s, indx, axis=0)
-    unique_z0 = np.delete(f.network.z0, indx, axis=0)
-    # Assign the unique s-parameters array back to the network object
-    f.network.s = unique_s
-    f.network.z0 = unique_z0
+def fourier_convolve(s2p_files_copy, thru):
+    # Function to apply a fourier filter to the data to remove noise - is applied to the list of all the files so it can be the first step in the analysis
+    # The threshold is the frequency above which the noise is removed
+    # The function then returns the filtered data back into the list of s2p files
     
+    thru_average = np.zeros((len(s2p_files_copy[0].network.f),2,2), dtype=complex) #initiate object to store empty FFT average of all the thru data for each s param hence the 2,2
+    for count_t, t in enumerate(thru,start=0):
+        for n in range(1,3):
+            for m in range(1,3):
+                # Extract the s-parameters
+                s_params = t.network.s[:,m-1,n-1]
+                
+                # Interpolate the data onto a uniform grid
+                f_uniform = np.linspace(t.network.f.min(), t.network.f.max(), len(t.network.f))
+                interp_func = interp.interp1d(t.network.f, s_params)
+                s_params_uniform = interp_func(f_uniform)
+                
+                # Apply Hanning window function
+                #window = np.hanning(len(s_params_uniform))
+                #s_params_uniform = s_params_uniform * window
+                
+                ## Perform the Fourier transform
+                fourier = fft.fft(s_params_uniform)
+                # Generate the frequencies for the Fourier transform
+                freqs = fft.fftfreq(len(s_params_uniform), d=f_uniform[1] - f_uniform[0])
+
+                # Generate average FFT amplitude for all inputted through devices to then multiply with the device data to 'convolve' in the FD
+                fourier_copy = np.copy(fourier)
+                if count_t == 0:
+                    thru_average[:,m-1,n-1] = fourier_copy
+                else:
+                    thru_average[:,m-1,n-1] = np.sum([fourier_copy, thru_average[:,m-1,n-1]], axis=0) / 2
+                
+    sum_freqs = np.zeros(len(s2p_files_copy[0].network.f)) # Initiating an empty numpy array same size as the data to store the sum of all the FFT's to find common peaks that could be systematic
+    sum_freqs_filtered = np.zeros(len(s2p_files_copy[0].network.f)) # Initiating an empty numpy array same size as the data to store the filtered FFt's to compare
+    for s in s2p_files_copy:
+        for n in range(1,3):
+            for m in range(1,3):
+                
+                # Extract the s-parameters
+                s_params = s.network.s[:,m-1,n-1]
+                
+                # Interpolate the data onto a uniform grid
+                f_uniform = np.linspace(s.network.f.min(), s.network.f.max(), len(s.network.f))
+                interp_func = interp.interp1d(s.network.f, s_params)
+                s_params_uniform = interp_func(f_uniform)
+                
+                # Apply Hanning window function
+                #window = np.hanning(len(s_params_uniform))
+                #s_params_uniform = s_params_uniform * window
+                
+                # Perform the Fourier transform
+                fourier = fft.fft(s_params_uniform)
+                
+                # Generate the frequencies for the Fourier transform
+                freqs = fft.fftfreq(len(s_params_uniform), d=f_uniform[1] - f_uniform[0])
+                sum_freqs += np.abs(fourier)
+
+                # Divide by the average of the through data to 'deconvolve' the data
+                filtered_fourier = np.subtract(np.copy(fourier),thru_average[:,m-1,n-1])
+                
+                sum_freqs_filtered += np.abs(filtered_fourier)
+                
+                # plt.figure(figsize=(10, 5))
+                # plt.title(f'{s.filename} - {m}{n}')
+                # plt.plot(freqs,np.real(fourier), color='blue',linestyle ='-')
+                # plt.plot(freqs,np.imag(fourier), color='blue',linestyle =':')
+                
+                # plt.plot(freqs,np.real(filtered_fourier), color='green',linestyle ='-')
+                # plt.plot(freqs,np.imag(filtered_fourier), color='green',linestyle =':')
+                
+                # plt.plot(freqs,np.real(thru_average[:,m-1,n-1]), color = 'purple',linestyle ='-')
+                # plt.plot(freqs,np.imag(thru_average[:,m-1,n-1]), color = 'purple',linestyle =':')
+                #plt.yscale('log')
+                
+                # Perform the inverse Fourier transform
+                filtered_s_params = fft.ifft(filtered_fourier)
+
+                # Interpolate the filtered data back onto the original frequency grid
+                interp_func = interp.interp1d(f_uniform, filtered_s_params)
+                filtered_s_params_original = interp_func(s.network.f)
+
+                # Write the filtered s-parameters back into the original data
+                s.network.s[:,m-1,n-1] = filtered_s_params_original
+
+        # Change the label to indicate the data has been filtered
+        s.filename = s.filename[0:-4] + '_FFT_filtered'
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(freqs,sum_freqs, color='blue',linestyle =':')
+    plt.plot(freqs,sum_freqs_filtered, color='green')
+    plt.plot(freqs,np.abs(thru_average[:,2-1,1-1]), color = 'purple')
+    plt.yscale('log')
+    return s2p_files_copy
+
+def fourier_inverse(s2p_files_copy2, thru):
+    # Function that carries out an inverse fourier transform on the through data to convert it to the time domain
+    # Then attempts to do the same for the rest of the data and to do matrix operations between them to deconvolve the thru from the rest of the s-parameters
+    # The function then returns the filtered data back into the list of s2p files
+
+    thru_average = np.zeros((2*len(s2p_files_copy2[0].network.f),2,2), dtype=complex) #initiate object to store empty FFT average of all the thru data for each s param hence the 2,2
+    for count_t, t in enumerate(thru,start=0):
+        for n in range(1,3):
+            for m in range(1,3):
+                # Extract the s-parameters
+                s_params = t.network.s[:,m-1,n-1]
+                
+                # Interpolate the data onto a uniform grid
+                f_uniform = np.linspace(t.network.f.min(), t.network.f.max(), len(t.network.f))
+                interp_func = interp.interp1d(t.network.f, s_params)
+                s_params_uniform = interp_func(f_uniform)
+                
+                # Apply Hanning window function
+                window = np.hanning(len(s_params_uniform))
+                s_params_uniform = s_params_uniform * window
+                
+                # Create a Hermitian symmetric version of the s-parameters
+                s_params_hermitian = np.concatenate((s_params_uniform, np.conj(s_params_uniform[::-1])))
+                
+                # Perform the inverse Fourier transform
+                time_domain = fft.ifft(s_params_hermitian)
+                
+                # Generate the frequencies for the inverse Fourier transform
+                freqs = fft.fftfreq(len(s_params_uniform), d=f_uniform[1] - f_uniform[0])
+
+                # Generate average FFT amplitude for all inputted through devices to then multiply with the device data to 'convolve' in the FD
+                time_domain_copy = np.copy(time_domain)
+                if count_t == 0:
+                    thru_average[:,m-1,n-1] = time_domain_copy
+                else:
+                    thru_average[:,m-1,n-1] = np.sum([time_domain_copy, thru_average[:,m-1,n-1]], axis=0) / 2
+                    
+    sum_times = np.zeros(2*len(s2p_files_copy2[0].network.f)) # Initiating an empty numpy array same size as the data to store the sum of all the time domain data to find common peaks that could be systematic
+    sum_times_filtered = np.zeros(2*len(s2p_files_copy2[0].network.f)) # Initiating an empty numpy array same size as the data to store the filtered time domain data to compare
+    time_domain = np.zeros((2*len(s2p_files_copy2[0].network.f),2,2), dtype=complex) #initiate object to store empty time domain data for each s param hence the 2,2
+    for s in s2p_files_copy2:
+        for n in range(1,3):
+            for m in range(1,3):
+                
+                # Extract the s-parameters
+                s_params = s.network.s[:,m-1,n-1]
+                
+                # Interpolate the data onto a uniform grid
+                f_uniform = np.linspace(s.network.f.min(), s.network.f.max(), len(s.network.f))
+                interp_func = interp.interp1d(s.network.f, s_params)
+                s_params_uniform = interp_func(f_uniform)
+                s_length = len(s_params_uniform)
+                
+                # Apply Hanning window function
+                window = np.hanning(len(s_params_uniform))
+                s_params_uniform = s_params_uniform * window
+                
+                # Create a Hermitian symmetric version of the s-parameters
+                s_params_hermitian = np.concatenate((s_params_uniform, np.conj(s_params_uniform[::-1])))
+                
+                # Perform the inverse Fourier transform
+                time_domain[:,m-1,n-1] = fft.ifft(s_params_hermitian)
+                
+        #sum_times += np.abs(time_domain)
+
+        # data process
+        #######################**************************************
+        
+        thru_average_sqrt = np.zeros((2*len(s2p_files_copy2[0].network.f),2,2), dtype=complex)
+        thru_average_sqrt_inv = np.zeros((2*len(s2p_files_copy2[0].network.f),2,2), dtype=complex)
+        time_domain_filtered = np.zeros((2*len(s2p_files_copy2[0].network.f),2,2), dtype=complex)
+        
+        # Compute the square root of the inverse
+        for i in range(time_domain.shape[0]):
+            # Compute the square root of the S-parameter matrix
+            thru_average_sqrt[i,:,:] = sqrtm(time_domain[i,:,:])
+            # Compute the inverse of the square root of the S-parameter matrix
+            thru_average_sqrt_inv[i,:,:] = np.linalg.inv(thru_average_sqrt[i,:,:])
+
+            # Pre and post multiply time_domain by the square root of the inverse
+            time_domain_filtered[i,:,:] = np.matmul((thru_average_sqrt_inv[i,:,:]), np.matmul(time_domain[i,:,:], thru_average_sqrt_inv[i,:,:]))
+        
+        
+        for n in range(1,3):
+            for m in range(1,3):        
+                # Perform the Fourier transform to convert back to s-parameters
+                s_params_filtered = fft.fft(time_domain_filtered[:,m-1,n-1])
+                
+                # Only keep the first half of the s-parameters (discard the symmetric part)
+                s_params_filtered = s_params_filtered[:s_length]
+                
+                # Interpolate the filtered data back onto the original frequency grid
+                interp_func = interp.interp1d(f_uniform, s_params_filtered)
+                filtered_s_params_original = interp_func(s.network.f)
+
+                # Write the filtered s-parameters back into the original data
+                s.network.s[:,m-1,n-1] = filtered_s_params_original
+
+  
+
+        # Change the label to indicate the data has been filtered
+        s.filename = s.filename[0:-4] + '_FFT_filtered'
+
+
+    # plt.figure(figsize=(10, 5))
+    # plt.plot(sample_times, sum_times, color='blue', linestyle=':')
+    # plt.plot(sample_times, sum_times_filtered, color='green')
+    # plt.yscale('log')
+
+    return s2p_files_copy2
 
 
 
-## Step 1 - fourier filter the initial files to remove noise
-s2p_filt = copy.deepcopy(s2p_files)
-s2p_filt = fourier_filter(s2p_filt, threshold = [1.8e-8,2.2e-8]) #apply to deepcopy to avoid modifying the original data
-dev_subs = subgen(s2p_files, run_nums =[[1,2,3,4,5,6], [31,27,23,35,39,41], [47,42,50]   ] )
-dev_subs_filt = subgen(s2p_filt, run_nums =[[1,2,3,4,5,6], [31,27,23,35,39,41], [47,42,50]   ] )
-#dev_subs = subgen(s2p_files, run_nums =[[1,2], [23], [42]   ] )
-
-
-#-------------------Grouping-------------------
-# Select the On Wafer Calibration files to be used
-ISS_thru = [s for s in s2p_filt if s.state == 'thru' and s.wafer_number == 0]
-cal_thru = [s for s in s2p_filt if s.state == 'thru' and s.wafer_number != 0]
-cal_open = [s for s in s2p_filt if s.state == 'open' or s.state == 'opensig']# or s.state == 'opennarrow' or s.state == 'openverynarrow']
-cal_short = [s for s in s2p_filt if s.state == 'short']
-    
-# Group files by their state so I can plot and compare states
-pristine = [s for s in s2p_filt if s.state == 'pristine']
-formed = [s for s in s2p_filt if s.state in ['formed', 'smallform', 'fullform']]
-
-# Group files with the same [r_number, c_number] values together so I can plot each device in all its states on one graph
-# Stores a list of S2PFile objects for each device in a dictionary, "dev", with the key being the device's [r_number, c_number] values
-#thus dev['11'] will have all the data for the device in row 1 column 1
-dev = {}
-for s in s2p_files:
-    key = f"r{s.dev_row}c{s.dev_col}"
-    if key in dev:
-        dev[key].append(s)
-    else:
-        dev[key] = [s]
-
-
-
-
-#-------------------De-Embedding-------------------
-print('open_short_thru',len(cal_open),len(cal_short),len(cal_thru))
- #whether to plot the de-embedding results
-OS = calibration_OS(cal_open, cal_short, cal_thru, plot_cal = False) #calibration object outputted from all the on wafer measurements
-TX = calibration_2x(cal_thru, plot_cal = False) #calibration object outputted from all the on wafer measurements
-
-
-
-#-------------------Plotting-------------------
-#def keyplot(OS, dev, dev_selection = None, sub_set = [], y_range = None,
-           # x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1]):        
-#'inputz' - plots the input impedance of the device
-
-x_range_input = "0.1-20ghz"#slice(0,-1)#"0.02-0.8ghz" #
-y_range_input = [0,200]#None#[0,200]
-# def subplot(dev_subs = [], cal_in = [], y_range = None,
-#             x_range = slice(0,-1), log_x = False, plot_type = 'S_db',m_port=[2], n_port=[1], deembed_data = True):
-
-# def subgen(s2p_files, run_nums = [[],[],[]]):
-
-
-
-
-# fig1 = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = ['power', 'inputz', 'S_db'],
-#                         log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
-# fig2 = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = ['power', 'inputz', 'S_db'],
-#                         log_x=False, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input)
-
-
-fig3 = subplot(dev_subs = dev_subs_filt, cal_in = TX, plot_type = ['inputz'],
-                        log_x=True, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
-fig3 = subplot(dev_subs = dev_subs_filt, cal_in = OS, plot_type = ['inputz'],
-                        log_x=True, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
-fig4 = subplot(dev_subs = dev_subs_filt, cal_in = OS, plot_type = ['inputz'],
-                        log_x=True, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
-
-
-
-# fig_dc, ax_dc = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = 'inputz',
-#                         log_x=True, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
-# fig_dc2, ax_dc2 = subplot(dev_subs = dev_subs, cal_in = OS, plot_type = 'inputz',
-#                         log_x=True, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
-
-
-plt.show()
-
-
-
-# fig_dev, ax_dev = keyplot(dev, cal_in = OS, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
-#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
-# fig_dev, ax_dev = keyplot(dev, cal_in = TX, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
-#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = True, y_range=y_range_input, x_range=x_range_input)
-# fig_dev, ax_dev = keyplot(dev, cal_in = TX, dev_selection = ['r2c1'],sub_set = ['formed_pos','formed_0','formed_neg'], plot_type = 'inputz',
-#                                     log_x=False, m_port=[2], n_port=[1],deembed_data = False, y_range=y_range_input, x_range=x_range_input)
 
 
 
 
 
-
-
-#'_set','_set1', '_set2', '_set3','_set4', '_set5', '_set6','_set7', '_set8', '_set9',  formed_0dc','formed_pos0.0','c1_pristine.','pristine_pos0.2
-
-#-------------------Network Set-------------------
-#takes a dictionary or list of networks as its input and converts to a network set object that can give errors etc for repeated measurements
-# Convert the dev dictionary of lists of s2p files into a dictionary of lists of networks
-
-#need filtering, probably taken from the keyplot function to select the devices and states to include in the network set
-# probably actually just want to make this another keyplot function that takes the network set as an input and then plots the data
-
-# dev_networks = {}
-# for key, value in dev.items():
-#     dev_networks[key] = [s.network for s in value]
-
-# ro_ns = NetworkSet(dev_networks, name='ro set')
-
-
-
-#--------------------------------------------------
-#--------------------------------------------------
-
-
-
-
-# %%
-import numpy as np
-np.linspace(0,1,20)
-
-
-
-# %%
