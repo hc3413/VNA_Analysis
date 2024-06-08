@@ -450,7 +450,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                     ax.set_ylabel('Magnitude (dB)')
                 else:
                     ax.set_ylabel('Magnitude')   
-                ax.legend(loc='upper right',fontsize='xx-small')
+                ax.legend(loc='lower right',fontsize='xx-small')
         #figs_axes.append((fig, ax))
     #return figs_axes
 
