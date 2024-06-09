@@ -510,24 +510,24 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8], t_window = False
                 if t_window != False:
                     s_params_uniform *= scipy.signal.windows.tukey(len(s_params_uniform), alpha=t_window, sym=True)
                 
-                # Perform the Fourier transform
-                fourier = fft.fft(s_params_uniform)
+                # Perform the inverse Fourier transform to go to time domain
+                time_data = fft.ifft(s_params_uniform)
                 
-                # Generate the frequencies for the Fourier transform
-                freqs = fft.fftfreq(len(s_params_uniform), d=f_uniform[1] - f_uniform[0])
+                # Generate the times for the inverse Fourier transform
+                times = fft.fftfreq(len(s_params_uniform), d=f_uniform[1] - f_uniform[0])
 
                 # Compute the amplitudes
-                amplitudes = np.abs(fourier)
+                amplitudes = np.abs(time_data)
                 sum_freqs += amplitudes
 
-                # Loop over the list of thresholds applying one or multiple bandstop filters to the Fourier transform
-                filtered_fourier = np.copy(fourier)
+                # Loop over the list of thresholds applying one or multiple bandstop filters to the time data
+                filtered_time_data = np.copy(time_data)
                 for thr in threshold:
-                    filtered_fourier[(np.abs(freqs) > thr[0]) & (np.abs(freqs) < thr[1])] = 0
-                sum_freqs_filtered += np.abs(filtered_fourier)
+                    filtered_time_data[(np.abs(times) > thr[0]) & (np.abs(times) < thr[1])] = 0
+                sum_freqs_filtered += np.abs(filtered_time_data)
                 
-                # Perform the inverse Fourier transform
-                filtered_s_params = fft.ifft(filtered_fourier)
+                # Perform the Fourier transform to go back to frequency domain
+                filtered_s_params = fft.fft(filtered_time_data)
 
                 # Interpolate the filtered data back onto the original frequency grid
                 interp_func = interp.interp1d(f_uniform, filtered_s_params)
@@ -540,8 +540,8 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8], t_window = False
         s.filename = s.filename[0:-4] + '_FFT_filtered'
 
     plt.figure(figsize=(5, 2))
-    plt.plot(freqs,sum_freqs, color='blue',linestyle =':')
-    plt.plot(freqs,sum_freqs_filtered, color='green')
+    plt.plot(times,sum_freqs, color='blue',linestyle =':')
+    plt.plot(times,sum_freqs_filtered, color='green')
     for thr in threshold:
         for t in thr:
             plt.axvline(x=t, color='red')
