@@ -350,6 +350,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
     # The function then plots all the devices in each subset on the same graph giving different line types to each subset
     # and different colors within each subset for each device
     # Plot type can be S, Z, Y, T, ABCD, or Smith from defauls - I have added linez, inputz, and power to calculate the input impedance,line impedance, and power
+    # if plot_type is snorm or z norm then it will normalise the input impedance or s parameters to the first item in the dataset
     
     figs_axes = [] #initialize an empty list to store the figure and axis objects
     line_styles = ['-', '--', '-.', ':'] #list of line styles to cycle through for each plot
@@ -370,7 +371,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             ax.set_title(f'{p_type}')     
               
     # Loop over the selected devices 
-        for subset in dev_subset:
+        for  subset in dev_subset:
             if iterate_lines == True:
                 line_obj = next(line_style_iterator) #get the first line style to pass as a plotting argument
             else:   
@@ -382,7 +383,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             colors = plt.get_cmap(color_obj)(np.linspace(0.2,1,num_colors))
             color_count = 0 #initiate color count to cycle through the colors for each device in the subset
                 
-            for dev in subset:      
+            for count_d, dev in enumerate(subset):      
 
                 if deembed_data == True:
                     data = cal_in.deembed(dev.network)
@@ -400,7 +401,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                             data_sliced.plot_s_smith(m=mm,n=nn,draw_labels=True, color=colors[color_count],
                                                                 linestyle = line_obj, label = f'S_{mm}{nn} {dev.filename}')   
                             
-                        elif p_type == 'inputz' or p_type == 'linez':
+                        elif p_type == 'inputz' or p_type == 'linez' or p_type == 'znorm' or p_type == 'snorm':
                             med_kernel = 23
                             Z11 = medfilt(data_sliced.z_re[:, 0, 0], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 0], kernel_size=med_kernel)
                             Z12 = medfilt(data_sliced.z_re[:, 0, 1], kernel_size=med_kernel) + 1j *medfilt(data_sliced.z_im[:, 0, 1], kernel_size=med_kernel)
@@ -420,7 +421,25 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                                 z_line = abs(Z11-Z12) + abs(Z22-Z12)
                                 ax.plot(data_sliced.f, z_line, color=colors[color_count],
                                     linestyle = '-', label = f'Z_line_mag{p_type}_{mm}{nn}: {dev.filename}') 
+                            elif p_type == 'znorm':
+                                z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
+                                # select firs device in the subset to normalise the input impedance to
+                                if count_d == 0:
+                                    z_ref = np.copy(z_in)
+                               
+                                #normalise the input impedance to the first device in the subset                               
+                                z_norm = abs(z_in)/abs(z_ref)
+                                     
+                                ax.plot(data_sliced.f, abs(z_norm), color=colors[color_count],
+                                    linestyle = '-', label = f'Z_norm_mag{p_type}_{mm}{nn}: {dev.filename}')
                                 
+                            elif p_type == 'snorm':
+                                if count_d == 0:
+                                    s_ref = data_sliced.s[:, mm-1, nn-1]
+
+                                s_norm = abs(data_sliced.s[:, mm-1, nn-1])/abs(s_ref)
+                                ax.plot(data_sliced.f, abs(s_norm), color=colors[color_count],
+                                    linestyle = '-', label = f'S_norm_mag{p_type}_{mm}{nn}: {dev.filename}')
                             
                         elif p_type == 'power':
                                     forward_power = np.square(np.abs(data_sliced.s[:,0,0])) + np.square(np.abs(data_sliced.s[:,0,1]))
@@ -468,7 +487,7 @@ def subgen(s2p_files, run_nums = [[],[],[]]):
         dev_subs.append(group)
     return dev_subs
 
-def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8]):
+def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8], t_window = False):
     # Function to apply a fourier filter to the data to remove noise - is applied to the list of all the files so it can be the first step in the analysis
     # The threshold is the frequency above which the noise is removed
     # The function then returns the filtered data back into the list of s2p files
@@ -486,6 +505,10 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8]):
                 f_uniform = np.linspace(s.network.f.min(), s.network.f.max(), len(s.network.f))
                 interp_func = interp.interp1d(s.network.f, s_params)
                 s_params_uniform = interp_func(f_uniform)
+                
+                # Apply Tuke window if window is True
+                if t_window != False:
+                    s_params_uniform *= scipy.signal.windows.tukey(len(s_params_uniform), alpha=t_window, sym=True)
                 
                 # Perform the Fourier transform
                 fourier = fft.fft(s_params_uniform)
@@ -516,7 +539,7 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8]):
         # Change the label to indicate the data has been filtered
         s.filename = s.filename[0:-4] + '_FFT_filtered'
 
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(5, 2))
     plt.plot(freqs,sum_freqs, color='blue',linestyle =':')
     plt.plot(freqs,sum_freqs_filtered, color='green')
     for thr in threshold:
