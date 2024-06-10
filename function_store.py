@@ -46,8 +46,7 @@ def import_data(data_path: str):
     # about the measurement device/state/type etc and stores it in the S2PFile object
     
     # Get a list of all .s2p files in the directory
-    files = [f for f in os.listdir(data_path) if f.endswith('.S2P')]
-    
+    files = [f for f in os.listdir(data_path) if f.lower().endswith('.s2p')]
     ### Initiate a list to store the filenames and their associated dates     
     file_dates = []
     # Loop over all files in the directory
@@ -62,16 +61,25 @@ def import_data(data_path: str):
                     # Add to list
                     file_dates.append((fi, date))
                     break
+                elif line.startswith('!Date:'):
+                    # Extract date and time from the line
+                    date_str = line.split(': ', 1)[1].strip()
+                    # Convert to datetime object
+                    date = datetime.datetime.strptime(date_str, '%A, %B %d, %Y %H:%M:%S')
+                    # Add to list
+                    file_dates.append((fi, date))
+                    break
                     
     # Sort the list chronologically based on the datetime
     file_dates.sort(key=itemgetter(1))
+  
     
-    #for f, date in file_dates:
-        #print(f, date)
+    # for f, date in file_dates:
+    #     print(f, date)
         
     # Extract the filenames in chronological order
     chron_files = [f[0] for f in file_dates]
-    
+
     ### Read each file and store it in a chronological list of S2PFile objects
     s2p_files = []
     run_count = 1
@@ -80,12 +88,17 @@ def import_data(data_path: str):
         #network.frequency.drop_non_monotonic_increasing() - get rid of any non-monotonic increasing frequency points but then causes array mismatch error later
         #state keywords to look for in filename, by default thru/short etc means the tapered version and it will have "notaper" in the filename if it is the straight thru
         #note that smaller words that are substrings of larger words should be placed after the larger words in the list
-        keywords = ['thrunotaper', 'opennotaper','shortnotaper', 'opensignotaper', 'openverynarrow','opennarrow', 'smallform', 'fullform', 'opensig', 'thruISS','pristine', 'formed', 'thru', 'open', 'short','set','reset']
+        keywords = ['thrunotaper', 'opennotaper','shortnotaper', 'opensignotaper', 'openverynarrow','opennarrow', 'smallform', 'fullform', 'opensig', 'thruISS','pristine', 'formed', 'thru', 'open', 'short','set','reset','linelong','line']
         state = next((x for x in keywords if x in f.lower()), None) #returns the first keyword found in the state value, stops as soon as the first keyword is found
         # Extract the row, colum and wafer numbers from the filename (e.g. wafer 1 r1_c11) and store into position variable
         wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)
         r_number = re.findall(r'_r(\d{1,2})_', f, re.IGNORECASE)
         c_number = re.findall(r'_c(\d{1,2})_', f, re.IGNORECASE)
+        # Check for the case where there is no state matching the keywords
+        if state is not None:
+            state = state.lower()
+        else:
+            state = None  # or some default value
         #store the network and its associated metadata in the S2PFile object grouped toegher in the s2p_files list
         if not wafer_number or not r_number or not c_number:
             s2p_files.append(S2PFile(network, f, int(0), None, None, state, run_count)) #ISS is classes as wafer zero
@@ -307,6 +320,10 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
                                         z_line = abs(Z11-Z12) + abs(Z22-Z12)
                                         ax.plot(data_sliced.f, z_line, color=colors[color_count],
                                             linestyle = '-', label = f'Z_line_mag{p_type}_{mm}{nn}: {dev.filename}') 
+                                
+                                elif p_type == 'oneportz':
+                                    z = 50*(1+data_sliced.s[:,1,1])/(1-data_sliced.s[:,1,1])    
+                                    ax.plot(data_sliced.f, abs(z), color=colors[color_count],label = f'Z_one_port{p_type}_{2}{2}: {r.filename}')
                                     
                                 elif p_type == 'power':
                                     forward_power = np.square(np.abs(data_sliced.s[:,0,0])) + np.square(np.abs(data_sliced.s[:,0,1]))
@@ -440,7 +457,11 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                                 s_norm = abs(data_sliced.s[:, mm-1, nn-1])/abs(s_ref)
                                 ax.plot(data_sliced.f, abs(s_norm), color=colors[color_count],
                                     linestyle = '-', label = f'S_norm_mag{p_type}_{mm}{nn}: {dev.filename}')
-                            
+                        
+                        elif p_type == 'oneportz':
+                            z = 50*(1+data_sliced.s[:,1,1])/(1-data_sliced.s[:,1,1])    
+                            ax.plot(data_sliced.f, abs(z), color=colors[color_count],label = f'Z_one_port{p_type}_{2}{2}: {dev.filename}')
+                                        
                         elif p_type == 'power':
                                     forward_power = np.square(np.abs(data_sliced.s[:,0,0])) + np.square(np.abs(data_sliced.s[:,0,1]))
                                     reverse_power = np.square(np.abs(data_sliced.s[:,1,0])) + np.square(np.abs(data_sliced.s[:,1,1]))
