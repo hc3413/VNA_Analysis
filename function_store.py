@@ -69,7 +69,14 @@ def import_data(data_path: str):
                     # Add to list
                     file_dates.append((fi, date))
                     break
-                    
+                elif line.startswith('! Date and time:'):
+                    # Extract date and time from the line
+                    date_str = line.split(': ', 1)[1].strip()
+                    # Convert to datetime object
+                    date = datetime.datetime.strptime(date_str, '%a %b %d %H:%M:%S %Y')
+                    # Add to list
+                    file_dates.append((fi, date))
+                    break
     # Sort the list chronologically based on the datetime
     file_dates.sort(key=itemgetter(1))
   
@@ -124,7 +131,7 @@ def duplicate_check(s2p_files):
 def calibration_OS(open, short, thru, plot_cal = False):
     # Function to generate an OpenShort De-embedding calibration and apply it to the on-wafer thru measurements
     # Inputs multiple open and short measurements and compares them to see which give the most effective de-embedding
-    # Outputs a list of de-embedding data and plots of the thru measurements before and after de-embedding for each protocol
+    # Outputs the best de-embedding protocol and plots of the thru measurements before and after de-embedding for each protocol
     # Prints the error and its integral for each de-embedding protocol to help select the best de-embedding data
   
     dm = [] #initialize an empty list to store the de-embedded data
@@ -172,9 +179,8 @@ def calibration_OS(open, short, thru, plot_cal = False):
 
 def calibration_2x(thru, plot_cal = False):
     # Function to generate 2x calibration from the thru measurements (though these are strictly speaking 2x + length of DUT so it isn't perfect)
-    
-    # Inputs multiple open and short measurements and compares them to see which give the most effective de-embedding
-    # Outputs a list of de-embedding data and plots of the thru measurements before and after de-embedding for each protocol
+    # Inputs thru devices and outputs the best de-embedding protocol based on the error of the de-embedding
+    # plots of the thru measurements before and after de-embedding for each protocol
     # Prints the error and its integral for each de-embedding protocol to help select the best de-embedding data
   
     dm = [] #initialize an empty list to store the de-embedded data
@@ -187,7 +193,6 @@ def calibration_2x(thru, plot_cal = False):
     for t  in thru:
         cal = IEEEP370_SE_NZC_2xThru(dummy_2xthru = t.network, name = '2xthru')
         dm.append(cal)
-    dm_list = range(len(dm))
     
     for count_t, th  in enumerate(thru, start=0):
         for i in range(len(dm)):
@@ -201,8 +206,8 @@ def calibration_2x(thru, plot_cal = False):
                     
             if plot_cal:
                 plt.figure(f'2x De-embedding')
-                th.network.plot_s_mag(m=1, n=0, color=colors[color_count], linestyle='dashed',label = f'Raw: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
-                thru_TX.plot_s_mag(m=1, n=0, color=colors[color_count], label = f'OS: {th.label}; {sh.label}; O{count_o}S{count_sh}T{count_th}')  # Plot only s21 with colorblind colormap
+                th.network.plot_s_mag(m=1, n=0, color=colors[color_count], linestyle='dashed',label = f'Raw: {th.label}')  # Plot only s21 with colorblind colormap
+                thru_TX.plot_s_mag(m=1, n=0, color=colors[color_count], label = f'TX: {th.label}')  # Plot only s21 with colorblind colormap
                 color_count += 1
             
             
@@ -218,14 +223,85 @@ def calibration_2x(thru, plot_cal = False):
     if plot_cal:
         plt.figure('Best De-embedding Protocol')
         thru[0].network.plot_s_mag(m=1, n=0, color='red', linestyle='dashed',label = f'Raw')  # Plot only s21 with colorblind colormap
-        dm[min_index].deembed(thru[0].network).plot_s_mag(m=1, n=0, color='green', label = f'Best OS:dm[{min_index}]')  # Plot only s21 with colorblind colormap
-        dm[max_index].deembed(thru[0].network).plot_s_mag(m=1, n=0, color='blue', label = f'Worst OS:dm[{max_index}]')  # Plot only s21 with colorblind colormap
+        dm[min_index].deembed(thru[0].network).plot_s_mag(m=1, n=0, color='green', label = f'Best TX:dm[{min_index}]')  # Plot only s21 with colorblind colormap
+        dm[max_index].deembed(thru[0].network).plot_s_mag(m=1, n=0, color='blue', label = f'Worst TX:dm[{max_index}]')  # Plot only s21 with colorblind colormap
    
     #only return the best de-embedding protocol
     return dm[min_index]
 
 
+def calibration_ABCD(thru, plot_cal = False):
+    # Function to Use ABCD parameters to de-embed the thru measurements
+    
+    # For ABCD parameters that cascade: [Measured_data] = [Half_thru]*[DUT]*[Half_thru]
+    # Therefore, [DUT] = [Half_thru]^-1*[Measured_data]*[Half_thru]^-1
+    # As [Thru] = [Half_thru]*[Half_thru] -> [Half_thru] = sqrt([Thru])
+    # Therefore, [DUT] = sqrt([Thru])^-1*[Measured_data]*sqrt([Thru])^-1
+    
+    # Inputs all of the on wafer Thru devices
+    # Outputs the best params to use for de-embedding - return = sqrt(ABCD)^-1 - such that you can later apply return*data*return to de-embed the data
+    # Prints the error and its integral for each de-embedding protocol to help select the best de-embedding data
+  
+    dm = [] #initialize an empty list to store the de-embedded data
+    total_error = [0.0] * len(thru) #initialize an empty list of floats to store the total error for each de-embedding protocol
+    num_colors = len(thru)*(len(thru)-1) #as each thru cal, len(thru), will be applied to all other thru measurements, (len(thru)-1)
+    colors = plt.cm.jet(np.linspace(0,1,num_colors))
+    color_count = 0
+    
+    # Generate calibration ABCD matrices for each thru device
+    for t in thru:
+        cal = t.network.a
+        # Initialize an empty array with the same shape as cal
+        cal_transformed = np.empty_like(cal)
+        # Iterate over the first dimension of cal to find the inverse square root of each 2x2 ABCD matrix and return it to cal_transformed
+        for i in range(cal.shape[0]):
+            # Compute the inverse square root of the 2x2 matrix at each f point
+            cal_transformed[i,:,:] = np.linalg.inv(sqrtm(cal[i,:,:]))
+        dm.append(cal_transformed)
 
+
+    
+    for count_t, th  in enumerate(thru, start=0):
+        for i in range(len(dm)):
+            # apply each deembedding to the thru device except for the one it was generated from
+            if i == count_t:
+                continue # skip this iteration of the for loop if the de-embedding protocol is being applied to the thru device it was generated from
+            
+            # pre and post multiply by the inverse square root of the ABCD matrix to de-embed the data
+            thru_ABCD_mat = np.matmul(dm[i],np.matmul(th.network.a,dm[i]))
+            # Generate a network object from the de-embedded data
+            thru_ABCD = rf.Network(frequency = th.network.f, a = thru_ABCD_mat, z0 = th.network.z0)
+            #store the error for each de-embedding protocol in the respective array index
+            error_value = np.abs(np.sum(thru_ABCD.s[:,1,0]))+np.abs(np.sum(thru_ABCD.s[:,0,1]))
+            total_error[i] += error_value #add the error for each de-embedding protocol applied to every thru to the total error for that protocol 
+                    
+            if plot_cal:
+                plt.figure(f'ABCD De-embedding')
+                th.network.plot_s_db(m=1, n=0, color=colors[color_count], linestyle='dashed',label = f'Raw: {th.label}')  # Plot only s21 with colorblind colormap
+                thru_ABCD.plot_s_db(m=1, n=0, color=colors[color_count], label = f'ABCD_deembeding: {th.label};')  # Plot only s21 with colorblind colormap
+                plt.ylim(-1,0.4)
+                color_count += 1
+            
+            
+    print(total_error)
+    
+    #Find the best de-embedding protocol
+    min_index = total_error.index(min(total_error))
+    max_index = total_error.index(max(total_error))
+
+    print(f"Best de-embedding protocol: dm[{min_index}] = {min(total_error)}, worst:dm[{max_index}] = {max(total_error)}")
+    
+
+    #only return the best de-embedding protocol
+    return dm[min_index]
+
+
+def deembed_ABCD(s2p_files, ABCD):
+# applies the selected ABCD de-embedding protocol to the data and re-writes the filename to have the de-embedded tag
+    for f in s2p_files:
+        f.network = rf.Network(frequency = f.network.f, a = np.matmul(ABCD,np.matmul(f.network.a,ABCD)), z0 = f.network.z0)
+        f.filename = f.filename + '_deembeded_ABCD'
+    return s2p_files
 
 
 
@@ -360,11 +436,10 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
 
 
 def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
-            x_range = slice(0,-1), log_x = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True, iterate_lines = False):
-    # Plotting function that takes an input of a dict of lists
-    # The dict items are the subsets of devices, e.g. pristine, formed, etc
-    # The lists are the devices that meet that criteria
-    # The function then plots all the devices in each subset on the same graph giving different line types to each subset
+            x_range = slice(0,-1), log_x = False, log_y = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True, iterate_lines = False,
+            p_legend = True, window_size = 0,R_in = 30e3):
+    # Plotting function that takes an input of a list of lists
+    # The function then plots all the devices in each subset on the same graph giving different color maps to each subset
     # and different colors within each subset for each device
     # Plot type can be S, Z, Y, T, ABCD, or Smith from defauls - I have added linez, inputz, and power to calculate the input impedance,line impedance, and power
     # if plot_type is snorm or z norm then it will normalise the input impedance or s parameters to the first item in the dataset
@@ -409,6 +484,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                     
                 #slice the data to plot selected frequency range (necessary for the smith chart where you can't change axis limits to do this)
                 data_sliced = data[x_range]
+                freq_plot = data_sliced.f/1e9 #convert frequency to GHz for plotting
 
                 # Loop over the selected S-parameters to plot
                 for mm in m_port:
@@ -430,13 +506,13 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                                 # Calculate the input impedance
                                 z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
                                 z_out = Z22 - np.multiply(Z12, Z21) / (Z11 + Z_load)
-                                ax.plot(data_sliced.f, abs(z_in), color=colors[color_count],
-                                        linestyle = '-', label = f'Z_in_mag{p_type}_{mm}{nn}: {dev.filename}') 
-                                ax.plot(data_sliced.f, abs(z_out), color=colors[color_count],
-                                        linestyle = ':', label = f'Z_out_mag{p_type}_{mm}{nn}: {dev.filename}')
+                                ax.plot(freq_plot, np.real(z_in), color=colors[color_count],
+                                        linestyle = '-', label = f'Real(Z_in)_mag{p_type}_{mm}{nn}: {dev.filename}') 
+                                ax.plot(freq_plot, np.imag(z_in), color=colors[color_count],
+                                        linestyle = ':', label = f'Imag(Z_in)_mag{p_type}_{mm}{nn}: {dev.filename}')
                             elif p_type == 'linez':
                                 z_line = abs(Z11-Z12) + abs(Z22-Z12)
-                                ax.plot(data_sliced.f, z_line, color=colors[color_count],
+                                ax.plot(freq_plot, z_line, color=colors[color_count],
                                     linestyle = '-', label = f'Z_line_mag{p_type}_{mm}{nn}: {dev.filename}') 
                             elif p_type == 'znorm':
                                 z_in = Z11 - np.multiply(Z12, Z21) / (Z22 + Z_load)
@@ -447,7 +523,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                                 #normalise the input impedance to the first device in the subset                               
                                 z_norm = abs(z_in)/abs(z_ref)
                                      
-                                ax.plot(data_sliced.f, abs(z_norm), color=colors[color_count],
+                                ax.plot(freq_plot, abs(z_norm), color=colors[color_count],
                                     linestyle = '-', label = f'Z_norm_mag{p_type}_{mm}{nn}: {dev.filename}')
                                 
                             elif p_type == 'snorm':
@@ -455,42 +531,67 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                                     s_ref = data_sliced.s[:, mm-1, nn-1]
 
                                 s_norm = abs(data_sliced.s[:, mm-1, nn-1])/abs(s_ref)
-                                ax.plot(data_sliced.f, abs(s_norm), color=colors[color_count],
+                                ax.plot(freq_plot, abs(s_norm), color=colors[color_count],
                                     linestyle = '-', label = f'S_norm_mag{p_type}_{mm}{nn}: {dev.filename}')
                         
                         elif p_type == 'oneportz':
                             z = 50*(1+data_sliced.s[:,1,1])/(1-data_sliced.s[:,1,1])    
-                            ax.plot(data_sliced.f, abs(z), color=colors[color_count],label = f'Z_one_port{p_type}_{2}{2}: {dev.filename}')
+                            ax.plot(freq_plot, abs(z), color=colors[color_count],label = f'Z_one_port{p_type}_{2}{2}: {dev.filename}')
+                            #ax.set_yscale('log')
                                         
                         elif p_type == 'power':
-                                    forward_power = np.square(np.abs(data_sliced.s[:,0,0])) + np.square(np.abs(data_sliced.s[:,0,1]))
-                                    reverse_power = np.square(np.abs(data_sliced.s[:,1,0])) + np.square(np.abs(data_sliced.s[:,1,1]))
-                                    
-                                    ax.plot(data_sliced.f, forward_power, color=colors[color_count],
-                                            linestyle = '-', label = f'Forward_power_mag{p_type}: {dev.filename}') 
-                                    ax.plot(data_sliced.f, reverse_power, color=colors[color_count],
-                                            linestyle = ':', label = f'Reverse_power_mag{p_type}: {dev.filename}')
-                                
+                            power_in = -12 #input power in dBm
+                            power_in_mw = 10**(power_in/10) #convert input power to mW
+                            if count_d == 0:
+                                print('Power in mW:', power_in_mw)
+                            forward_power = power_in_mw*(1 - np.square(np.abs(data_sliced.s[:,0,0])) - np.square(np.abs(data_sliced.s[:,1,0])))
+                            reverse_power = power_in_mw*(1 - np.square(np.abs(data_sliced.s[:,1,1])) - np.square(np.abs(data_sliced.s[:,0,1])))
+                            
+                            ax.plot(freq_plot, forward_power, color=colors[color_count],
+                                    linestyle = '-', label = f'Forward_power_mag{p_type}: {dev.filename}') 
+                            ax.plot(freq_plot, reverse_power, color=colors[color_count],
+                                    linestyle = ':', label = f'Reverse_power_mag{p_type}: {dev.filename}')
+                            ax.set_ylabel('Power dissipated (mW)')
+                            
+                        elif p_type == 'cap':
+                            z_dut = getattr(data_sliced, 'a')[:,0,1]
+                            f_app = getattr(data_sliced, 'f')
+                            c_f = ((1j)/(2*np.pi)) * ((1/R_in)-(1/z_dut))
+                            ax.plot(freq_plot, abs(c_f), color=colors[color_count],
+                                    linestyle = '-', label = f'Cap*freq{p_type}_{mm}{nn}: {dev.filename}')
+                            ax.plot(freq_plot, np.divide(abs(c_f),f_app), color=colors[color_count],
+                                    linestyle = ':', label = f'Cap{p_type}_{mm}{nn}: {dev.filename}')          
                         
                         else:
                             p_data = getattr(data_sliced, p_type)[:, mm-1, nn-1]
-                            #apply median filter to the data to smooth it
-                            p_data_smoothed = p_data#medfilt(p_data, kernel_size=23)
-                            
-                            ax.plot(data_sliced.f, p_data_smoothed, color=colors[color_count],
+                            # apply moving average filter to the data to smooth it
+                            if window_size != 0:
+                                
+                                window_s = window_size
+                                p_data_smoothed = np.convolve(p_data, np.ones(window_s)/window_s, mode='same')
+                            else:
+                                p_data_smoothed = p_data
+                            # plot the data
+                            ax.plot(freq_plot, p_data_smoothed, color=colors[color_count],
                                     linestyle = line_obj, label = f'{p_type}_{mm}{nn}: {dev.filename}')   
                 color_count += 1 # change color for each file (needs to be inside the subset check loop so it only changes for the files that are plotted)
 
                 if log_x:
                             ax.set_xscale('log')
+                if log_y:
+                            ax.set_yscale('log')
                 if y_range is not None:
                     ax.set_ylim(y_range)          
-                ax.set_xlabel('Frequency (Hz)')
+                ax.set_xlabel('Frequency (GHz)')
                 if p_type == 's_db':
                     ax.set_ylabel('Magnitude (dB)')
-                else:
+                elif p_type == 's_deg' or p_type == 'z_deg' or p_type == 'y_deg' or p_type == 't_deg' or p_type == 'a_deg':
+                    ax.set_ylabel('Phase (degrees)')
+                elif p_type != 'power':
                     ax.set_ylabel('Magnitude')   
-                ax.legend(loc='lower right',fontsize='xx-small')
+                if p_legend == True:
+                    ax.legend(loc='lower right',fontsize='xx-small')
+                    
         #figs_axes.append((fig, ax))
     #return figs_axes
 
@@ -558,7 +659,7 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8], t_window = False
                 s.network.s[:,m-1,n-1] = filtered_s_params_original
 
         # Change the label to indicate the data has been filtered
-        s.filename = s.filename[0:-4] + '_FFT_filtered'
+        s.filename = s.filename[0:-1] + '_FFT_filtered'
 
     plt.figure(figsize=(5, 2))
     plt.plot(times,sum_freqs, color='blue',linestyle =':')
