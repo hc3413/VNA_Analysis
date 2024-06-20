@@ -163,7 +163,7 @@ def calibration_OS(open, short, thru, plot_cal = False):
     min_index = error.index(min(error))
     max_index = error.index(max(error))
 
-    print(f"Best de-embedding protocol: dm[{min_index}] = {min(error)}, worst:dm[{max_index}] = {max(error)}")
+    print(f"Best OS de-embedding protocol: dm[{min_index}] = {min(error)}, worst:dm[{max_index}] = {max(error)}")
     
     #Plot the best de-embedding protocol
     if plot_cal:
@@ -217,7 +217,7 @@ def calibration_2x(thru, plot_cal = False):
     min_index = total_error.index(min(total_error))
     max_index = total_error.index(max(total_error))
 
-    print(f"Best de-embedding protocol: dm[{min_index}] = {min(total_error)}, worst:dm[{max_index}] = {max(total_error)}")
+    print(f"Best TX de-embedding protocol: dm[{min_index}] = {min(total_error)}, worst:dm[{max_index}] = {max(total_error)}")
     
     #Plot the best de-embedding protocol
     if plot_cal:
@@ -247,6 +247,15 @@ def calibration_ABCD(thru, plot_cal = False):
     num_colors = len(thru)*(len(thru)-1) #as each thru cal, len(thru), will be applied to all other thru measurements, (len(thru)-1)
     colors = plt.cm.jet(np.linspace(0,1,num_colors))
     color_count = 0
+    
+    # If there is only one thru device then return the inverse square root of the ABCD matrix and skip the error calculations
+    if len(thru) == 1:
+        t = thru[0]
+        cal = t.network.a
+        cal_transformed = np.empty_like(cal)
+        for i in range(cal.shape[0]):
+            cal_transformed[i,:,:] = np.linalg.inv(sqrtm(cal[i,:,:]))
+        return cal_transformed
     
     # Generate calibration ABCD matrices for each thru device
     for t in thru:
@@ -289,7 +298,7 @@ def calibration_ABCD(thru, plot_cal = False):
     min_index = total_error.index(min(total_error))
     max_index = total_error.index(max(total_error))
 
-    print(f"Best de-embedding protocol: dm[{min_index}] = {min(total_error)}, worst:dm[{max_index}] = {max(total_error)}")
+    print(f"Best ABCD de-embedding protocol: dm[{min_index}] = {min(total_error)}, worst:dm[{max_index}] = {max(total_error)}")
     
 
     #only return the best de-embedding protocol
@@ -437,7 +446,7 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
 
 def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             x_range = slice(0,-1), log_x = False, log_y = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True, iterate_lines = False,
-            p_legend = True, window_size = 0,R_in = 30e3):
+            p_legend = True, window_size = 0,R_in = [30e3]):
     # Plotting function that takes an input of a list of lists
     # The function then plots all the devices in each subset on the same graph giving different color maps to each subset
     # and different colors within each subset for each device
@@ -556,11 +565,9 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                         elif p_type == 'cap':
                             z_dut = getattr(data_sliced, 'a')[:,0,1]
                             f_app = getattr(data_sliced, 'f')
-                            c_f = ((1j)/(2*np.pi)) * ((1/R_in)-(1/z_dut))
-                            ax.plot(freq_plot, abs(c_f), color=colors[color_count],
-                                    linestyle = '-', label = f'Cap*freq{p_type}_{mm}{nn}: {dev.filename}')
+                            c_f = ((1j)/(2*np.pi)) * ((1/R_in[count_d])-(1/z_dut))
                             ax.plot(freq_plot, np.divide(abs(c_f),f_app), color=colors[color_count],
-                                    linestyle = ':', label = f'Cap{p_type}_{mm}{nn}: {dev.filename}')          
+                                    linestyle = '-', label = f'Cap{p_type}_{mm}{nn}:res{R_in[count_d]} {dev.filename}')          
                         
                         else:
                             p_data = getattr(data_sliced, p_type)[:, mm-1, nn-1]
