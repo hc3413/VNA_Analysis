@@ -23,3 +23,4 @@ import scipy.interpolate as interp
 import copy
 from scipy.signal import find_peaks
 from scipy.linalg import sqrtm
+from scipy.optimize import minimize
