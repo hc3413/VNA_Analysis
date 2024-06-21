@@ -446,7 +446,7 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
 
 def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             x_range = slice(0,-1), log_x = False, log_y = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True, iterate_lines = False,
-            p_legend = True, window_size = 0,R_in = [30e3]):
+            p_legend = True, window_size = 0,R_in = [30e3],dot_line = False):
     # Plotting function that takes an input of a list of lists
     # The function then plots all the devices in each subset on the same graph giving different color maps to each subset
     # and different colors within each subset for each device
@@ -472,7 +472,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             ax.set_title(f'{p_type}')     
               
     # Loop over the selected devices 
-        for  subset in dev_subset:
+        for  sub_count, subset in enumerate(dev_subset, start=0):
             if iterate_lines == True:
                 line_obj = next(line_style_iterator) #get the first line style to pass as a plotting argument
             else:   
@@ -565,9 +565,10 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                         elif p_type == 'cap':
                             z_dut = getattr(data_sliced, 'a')[:,0,1]
                             f_app = getattr(data_sliced, 'f')
-                            c_f = ((1j)/(2*np.pi)) * ((1/R_in[count_d])-(1/z_dut))
+                            R_p = R_in[sub_count][count_d]
+                            c_f = ((1)/(1j*2*np.pi)) * ( (R_p-(z_dut-30))/((z_dut-30)*R_p) )
                             ax.plot(freq_plot, np.divide(abs(c_f),f_app), color=colors[color_count],
-                                    linestyle = '-', label = f'Cap{p_type}_{mm}{nn}:res{R_in[count_d]} {dev.filename}')          
+                                    linestyle = '-', label = f'Cap{p_type}_{mm}{nn}:res{R_p} {dev.filename}')          
                         
                         else:
                             p_data = getattr(data_sliced, p_type)[:, mm-1, nn-1]
@@ -579,8 +580,13 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                             else:
                                 p_data_smoothed = p_data
                             # plot the data
+                            if dot_line:
+                                linestyle = ':'
+                            else:
+                                linestyle = line_obj
+                            
                             ax.plot(freq_plot, p_data_smoothed, color=colors[color_count],
-                                    linestyle = line_obj, label = f'{p_type}_{mm}{nn}: {dev.filename}')   
+                                    linestyle=linestyle, label=f'{p_type}_{mm}{nn}: {dev.filename}')
                 color_count += 1 # change color for each file (needs to be inside the subset check loop so it only changes for the files that are plotted)
 
                 if log_x:
