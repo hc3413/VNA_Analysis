@@ -456,7 +456,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
     figs_axes = [] #initialize an empty list to store the figure and axis objects
     line_styles = ['-', '--', '-.', ':'] #list of line styles to cycle through for each plot
     line_style_iterator = itertools.cycle(line_styles) #makes an iterator object that can be cyled through with next() to get the next line style
-    color_maps = ['binary','winter','autumn','Greens', 'Purples','Blues', 'Oranges',
+    color_maps = ['Greys_r','winter','autumn','Greens', 'Purples','Blues', 'Oranges',
             'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu',
             'GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn','Reds'] #list of sequential color maps to cycle through for each subset
     
@@ -481,7 +481,7 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             color_obj = next(color_map_iterator) #get the first color map to pass as a plotting argument
             
             num_colors = len(subset) # set number of colors to number of devices within the subset
-            colors = plt.get_cmap(color_obj)(np.linspace(0.2,1,num_colors))
+            colors = plt.get_cmap(color_obj)(np.linspace(0.1,0.9,num_colors))
             color_count = 0 #initiate color count to cycle through the colors for each device in the subset
                 
             for count_d, dev in enumerate(subset):      
@@ -550,23 +550,23 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                                         
                         elif p_type == 'power':
                             power_in = -12 #input power in dBm
-                            power_in_mw = 10**(power_in/10) #convert input power to mW
+                            power_in_uw = 10**(power_in/10)*1000 #convert input power to uW
                             if count_d == 0:
-                                print('Power in mW:', power_in_mw)
-                            forward_power = power_in_mw*(1 - np.square(np.abs(data_sliced.s[:,0,0])) - np.square(np.abs(data_sliced.s[:,1,0])))
-                            reverse_power = power_in_mw*(1 - np.square(np.abs(data_sliced.s[:,1,1])) - np.square(np.abs(data_sliced.s[:,0,1])))
+                                print('Power in mW:', power_in_uw)
+                            forward_power = power_in_uw*(1 - np.square(np.abs(data_sliced.s[:,0,0])) - np.square(np.abs(data_sliced.s[:,1,0])))
+                            reverse_power = power_in_uw*(1 - np.square(np.abs(data_sliced.s[:,1,1])) - np.square(np.abs(data_sliced.s[:,0,1])))
                             
                             ax.plot(freq_plot, forward_power, color=colors[color_count],
                                     linestyle = '-', label = f'Forward_power_mag{p_type}: {dev.filename}') 
                             ax.plot(freq_plot, reverse_power, color=colors[color_count],
                                     linestyle = ':', label = f'Reverse_power_mag{p_type}: {dev.filename}')
-                            ax.set_ylabel('Power dissipated (mW)')
+                            ax.set_ylabel('Power dissipated (uW)')
                             
                         elif p_type == 'cap':
                             z_dut = getattr(data_sliced, 'a')[:,0,1]
                             f_app = getattr(data_sliced, 'f')
                             R_p = R_in[sub_count][count_d]
-                            c_f = ((1)/(1j*2*np.pi)) * ( (R_p-(z_dut-30))/((z_dut-30)*R_p) )
+                            c_f = ((1)/(1j*2*np.pi)) * ( (R_p-(z_dut-9))/((z_dut-9)*R_p) )
                             ax.plot(freq_plot, np.divide(abs(c_f),f_app), color=colors[color_count],
                                     linestyle = '-', label = f'Cap{p_type}_{mm}{nn}:res{R_p} {dev.filename}')          
                         
