@@ -41,7 +41,7 @@ class S2PFile:
 
 def import_data(data_path: str):
     # Function to import the data from the VNA files and store it in a list of S2PFile objects
-    # Extracts the dat and time from the s2p file, uses it to sort the files in chronological order, 
+    # Extracts the date and time from the s2p file, uses it to sort the files in chronological order, 
     # assigns a key number to each file based off this and then extracts information from the filename
     # about the measurement device/state/type etc and stores it in the S2PFile object
     
@@ -95,7 +95,9 @@ def import_data(data_path: str):
         #network.frequency.drop_non_monotonic_increasing() - get rid of any non-monotonic increasing frequency points but then causes array mismatch error later
         #state keywords to look for in filename, by default thru/short etc means the tapered version and it will have "notaper" in the filename if it is the straight thru
         #note that smaller words that are substrings of larger words should be placed after the larger words in the list
-        keywords = ['thrunotaper', 'opennotaper','shortnotaper', 'opensignotaper', 'openverynarrow','opennarrow', 'smallform', 'fullform', 'opensig', 'thruISS','pristine', 'formed', 'thru', 'open', 'short','set','reset','linelong','line']
+        keywords = ['thrunotaper', 'opennotaper','shortnotaper', 'opensignotaper', 'openverynarrow','opennarrow', 'smallform', 'fullform', 'opensig', 'thruISS','linelong','line','set1','set2','set3','set4',
+                    'set5','set6','set7','reset1','reset2','reset3','reset4','reset5','reset6','reset7','formed(0)','formed(1)','formed(2)',
+                    'formed(3)','formed(4)','formed(5)','formed(6)','formed(7)','formed(8)','formed(9)','formed(10)','formed(11)','formed(12)','pristine', 'formed', 'thru', 'open', 'short','set','reset']
         state = next((x for x in keywords if x in f.lower()), None) #returns the first keyword found in the state value, stops as soon as the first keyword is found
         # Extract the row, colum and wafer numbers from the filename (e.g. wafer 1 r1_c11) and store into position variable
         wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)
