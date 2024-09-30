@@ -95,9 +95,12 @@ def import_data(data_path: str):
         #network.frequency.drop_non_monotonic_increasing() - get rid of any non-monotonic increasing frequency points but then causes array mismatch error later
         #state keywords to look for in filename, by default thru/short etc means the tapered version and it will have "notaper" in the filename if it is the straight thru
         #note that smaller words that are substrings of larger words should be placed after the larger words in the list
-        keywords = ['thrunotaper', 'opennotaper','shortnotaper', 'opensignotaper', 'openverynarrow','opennarrow', 'smallform', 'fullform', 'opensig', 'thruISS','linelong','line','set1','set2','set3','set4',
-                    'set5','set6','set7','reset1','reset2','reset3','reset4','reset5','reset6','reset7','formed(0)','formed(1)','formed(2)',
-                    'formed(3)','formed(4)','formed(5)','formed(6)','formed(7)','formed(8)','formed(9)','formed(10)','formed(11)','formed(12)','pristine', 'formed', 'thru', 'open', 'short','set','reset']
+        keywords = ['thrunotaper', 'opennotaper','shortnotaper', 'opensignotaper', 'openverynarrow','opennarrow', 'smallform', 'fullform', 'opensig', 'thruISS','linelong','line',
+            'set(1)','set1','set(2)','set2','set(3)','set3','set(4)','set4','set(5)','set5','set(6)','set6','set(7)','set7', 'set(8)','set8', 'reset(1)','reset1','reset(2)','reset2',
+            'reset(3)','reset3','reset(4)','reset4','reset(5)','reset5','reset(6)','reset6','reset(7)','reset7',
+            'formed(0)','formed0','formed(1)','formed1','formed(2)','formed2','formed(3)','formed3','formed(4)','formed4','formed(5)','formed5','formed(6)','formed6',
+            'formed(7)','formed7','formed(8)','formed8','formed(9)','formed9','formed(10)','formed10','formed(11)','formed11','formed(12)','formed12',
+            'pristine', 'formed', 'thru', 'open', 'short','set','reset']
         state = next((x for x in keywords if x in f.lower()), None) #returns the first keyword found in the state value, stops as soon as the first keyword is found
         # Extract the row, colum and wafer numbers from the filename (e.g. wafer 1 r1_c11) and store into position variable
         wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)
@@ -570,7 +573,34 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                             R_p = R_in[sub_count][count_d]
                             c_f = ((1)/(1j*2*np.pi)) * ( (R_p-(z_dut-9))/((z_dut-9)*R_p) )
                             ax.plot(freq_plot, np.divide(abs(c_f),f_app), color=colors[color_count],
-                                    linestyle = '-', label = f'Cap{p_type}_{mm}{nn}:res{R_p} {dev.filename}')          
+                                    linestyle = '-', label = f'Cap{p_type}_{mm}{nn}:res{R_p} {dev.filename}')  
+                            
+                        elif p_type == 'perm':
+                            z_dut = getattr(data_sliced, 'a')[:,0,1]
+                            f_app = getattr(data_sliced, 'f')
+                            R_p = R_in[sub_count][count_d]
+                            perm_f = np.divide( (((1)/(1j*2*np.pi*f_app)) * ( (R_p-(z_dut-9))/((z_dut-9)*R_p) ) * 20e-9 ),(8.854e-12 * (20e-6)**2) )
+                            ax.plot(freq_plot, np.real(perm_f), color=colors[color_count],
+                                    linestyle = '-', label = f"$\epsilon'-res:{R_p}-{dev.filename}")    
+                            ax.plot(freq_plot, np.imag(perm_f), color=colors[color_count],
+                                    linestyle = ':', label = f"\epsilon''-res:{R_p}-{dev.filename}")   
+                            
+                        elif p_type == 'cole_plot':
+                            z_dut = getattr(data_sliced, 'a')[:,0,1]     
+                            ax.plot(np.real(z_dut), -np.imag(z_dut), color=colors[color_count],
+                                    linestyle = '-', label = f'ZZ{dev.filename}') 
+                            ax.set_ylabel("Z''")
+                            ax.set_xlabel("Z'")
+                            
+                        elif p_type == 'modulus_plot':
+                            z_dut = getattr(data_sliced, 'a')[:,0,1]    
+                            f_app = getattr(data_sliced, 'f')
+                            C_0 = np.divide(8.854e-12 * (20e-6)**2, 20e-9)
+                            mod_dut = z_dut*2*np.pi*f_app*C_0
+                            ax.plot(np.real(mod_dut), -np.imag(mod_dut), color=colors[color_count],
+                                    linestyle = '-', label = f'ZZ{dev.filename}') 
+                            ax.set_ylabel("Z''")
+                            ax.set_xlabel("Z'")
                         
                         else:
                             p_data = getattr(data_sliced, p_type)[:, mm-1, nn-1]
