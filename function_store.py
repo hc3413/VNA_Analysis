@@ -635,13 +635,16 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                 if log_y:
                             ax.set_yscale('log')
                 if y_range is not None:
-                    ax.set_ylim(y_range)          
-                ax.set_xlabel('Frequency (GHz)')
+                    ax.set_ylim(y_range)   
+                
+                if p_type != 'cole_plot' or p_type != 'modulus_plot':   
+                    ax.set_xlabel('Frequency (GHz)')    
+                    
                 if p_type == 's_db':
                     ax.set_ylabel('Magnitude (dB)')
                 elif p_type == 's_deg' or p_type == 'z_deg' or p_type == 'y_deg' or p_type == 't_deg' or p_type == 'a_deg':
                     ax.set_ylabel('Phase (degrees)')
-                elif p_type != 'power':
+                elif p_type != 'power' or p_type != 'cole_plot' or p_type != 'modulus_plot':
                     ax.set_ylabel('Magnitude')   
                 if p_legend == True:
                     ax.legend(loc='lower right',fontsize='xx-small')
@@ -649,19 +652,33 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
         #figs_axes.append((fig, ax))
     #return figs_axes
 
-def subgen(s2p_files, run_nums = [[],[],[]]):
-    # Function taking all the s2p files and grouping them into a list of subsets, where each subset is itself a list of the s2p files
-    # The subsets can then be plotted in different colors/linetypes on the same graph
-    # Input option 1: run_nums is a list of lists, each list contains the run numbers for the subset of devices
-    # Input option 2: 
-    dev_subs = {}
-    dev_subs = []
-    for l in run_nums:
-        group = []
-        for n in l:
-            group.append(s2p_files[n-1]) #subtract 1 from the run number due to zero indexing in python
-        dev_subs.append(group)
-    return dev_subs
+def subgen(s2p_files, run_nums=[[], [], []], dev_selection=None):
+    '''Function taking all the s2p files and grouping them into a list of subsets, where each subset is itself a list of the s2p files
+     The subsets can then be plotted in different colors/linetypes on the same graph
+     option 1: raw_data_siox = subgen(s2p_files_1,dev_selection=['r1c9','r2c8'])
+     option 2: raw_data_siox = subgen(s2p_files_1,run_nums=[[1,2,3],[4,5,6],[7,8,9]])
+     
+     '''
+    
+    # Input option 1: seach for devices with specified label and group into lists
+    if dev_selection is not None:
+        dev_subs = []
+        for key in dev_selection:
+            group = []
+            for s2p in s2p_files:
+                if key in s2p.label:
+                    group.append(s2p)
+            dev_subs.append(group)
+        return dev_subs
+    else:
+        # Input option 2: run_nums is a list of lists, each list contains the run numbers for the subset of devices
+        dev_subs = []
+        for l in run_nums:
+            group = []
+            for n in l:
+                group.append(s2p_files[n-1])  # subtract 1 from the run number due to zero indexing in python
+            dev_subs.append(group)
+        return dev_subs
 
 def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8], t_window = False):
     # Function to apply a fourier filter to the data to remove noise - is applied to the list of all the files so it can be the first step in the analysis
