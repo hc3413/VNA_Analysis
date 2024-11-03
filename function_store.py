@@ -22,7 +22,7 @@ from scipy.linalg import sqrtm
 
 
 
-# Define a class to store the VNA data alongside its ascociated with the filename, device index, and state
+# Define a class to store the VNA data alongside its ascociated with the filename, device index, state and DC resistance
 @dataclass
 class S2PFile:
     network: rf.Network
@@ -32,10 +32,11 @@ class S2PFile:
     dev_col: int #column of device on wafer
     state: str
     run: int #run number to identify the measurements chronological position in the list
+    res: float #resistance of the device as measured with DC IV sweep
     
     @property #generating a unique label for the device that can be used in plots to identify it
     def label(self) -> str:
-        return f"run{self.run}_r{self.dev_row}c{self.dev_col}_{self.state}"
+        return f"run{self.run}_r{self.dev_row}c{self.dev_col}_{self.state}_{self.res}ohm"
 
 ############ Start of Functions
 
@@ -80,7 +81,7 @@ def import_data(data_path: str):
     # Sort the list chronologically based on the datetime
     file_dates.sort(key=itemgetter(1))
   
-    
+    # Print the filenames and dates in chronological order to check
     # for f, date in file_dates:
     #     print(f, date)
         
@@ -94,10 +95,10 @@ def import_data(data_path: str):
         network = rf.Network(os.path.join(data_path,f))
         #network.frequency.drop_non_monotonic_increasing() - get rid of any non-monotonic increasing frequency points but then causes array mismatch error later
         #state keywords to look for in filename, by default thru/short etc means the tapered version and it will have "notaper" in the filename if it is the straight thru
-        #note that smaller words that are substrings of larger words should be placed after the larger words in the list
+        #note that smaller words that are substrings of larger words should be placed after the larger words in the list as it will search first for terms at start of the string
         keywords = ['thrunotaper', 'opennotaper','shortnotaper', 'opensignotaper', 'openverynarrow','opennarrow', 'smallform', 'fullform', 'opensig', 'thruISS','linelong','line',
-            'set(1)','set1','set(2)','set2','set(3)','set3','set(4)','set4','set(5)','set5','set(6)','set6','set(7)','set7', 'set(8)','set8', 'reset(1)','reset1','reset(2)','reset2',
-            'reset(3)','reset3','reset(4)','reset4','reset(5)','reset5','reset(6)','reset6','reset(7)','reset7',
+            'reset(1)','reset1','reset(2)','reset2', 'reset(3)','reset3','reset(4)','reset4','reset(5)','reset5','reset(6)','reset6','reset(7)','reset7',
+            'set(1)','set1','set(2)','set2','set(3)','set3','set(4)','set4','set(5)','set5','set(6)','set6','set(7)','set7', 'set(8)','set8', 
             'formed(0)','formed0','formed(1)','formed1','formed(2)','formed2','formed(3)','formed3','formed(4)','formed4','formed(5)','formed5','formed(6)','formed6',
             'formed(7)','formed7','formed(8)','formed8','formed(9)','formed9','formed(10)','formed10','formed(11)','formed11','formed(12)','formed12',
             'pristine', 'formed', 'thru', 'open', 'short','set','reset']
@@ -113,9 +114,9 @@ def import_data(data_path: str):
             state = None  # or some default value
         #store the network and its associated metadata in the S2PFile object grouped toegher in the s2p_files list
         if not wafer_number or not r_number or not c_number:
-            s2p_files.append(S2PFile(network, f, int(0), None, None, state, run_count)) #ISS is classes as wafer zero
+            s2p_files.append(S2PFile(network, f, int(0), None, None, state, run_count, None)) #ISS is classes as wafer zero
         else:
-            s2p_files.append(S2PFile(network, f, int(wafer_number[0]), int(r_number[0]), int(c_number[0]), state.lower(),run_count))
+            s2p_files.append(S2PFile(network, f, int(wafer_number[0]), int(r_number[0]), int(c_number[0]), state.lower(), run_count, None))
         run_count += 1
     return s2p_files
 
@@ -465,7 +466,8 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu',
             'GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn','Reds'] #list of sequential color maps to cycle through for each subset
     
-    
+  
+        
     # Loop entire plotting function over the selected plot types
     for p_type in plot_type: 
         p_type = p_type.lower() # removes case sensitivity for the plot type input (Smith/smith/SMITH... all work)
@@ -474,7 +476,11 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
         if deembed_data == True:
             ax.set_title(f'{p_type} - deembedding: {cal_in.name}')            
         else:
-            ax.set_title(f'{p_type}')     
+            ax.set_title(f'{p_type}')    
+            
+        # Create double axis outside of loop for plots that require it
+        if p_type == 'perm':
+            ax2 = ax.twinx()    
               
     # Loop over the selected devices 
         for  sub_count, subset in enumerate(dev_subset, start=0):
@@ -582,8 +588,11 @@ def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
                             perm_f = np.divide( (((1)/(1j*2*np.pi*f_app)) * ( (R_p-(z_dut-9))/((z_dut-9)*R_p) ) * 20e-9 ),(8.854e-12 * (20e-6)**2) )
                             ax.plot(freq_plot, np.real(perm_f), color=colors[color_count],
                                     linestyle = '-', label = f"$\epsilon'-res:{R_p}-{dev.filename}")    
-                            ax.plot(freq_plot, np.imag(perm_f), color=colors[color_count],
-                                    linestyle = ':', label = f"\epsilon''-res:{R_p}-{dev.filename}")   
+                            ax.set_ylabel("Real Part ($\epsilon'$)")
+                            
+                            ax2.plot(freq_plot, np.imag(perm_f), color=colors[color_count],
+                                    linestyle = ':', label = f"$\epsilon''-res:{R_p}-{dev.filename}")
+                            ax2.set_ylabel("Imaginary Part ($\epsilon''$)")
                             
                         elif p_type == 'cole_plot':
                             z_dut = getattr(data_sliced, 'a')[:,0,1]     
@@ -720,8 +729,8 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8], t_window = False
 
 
 def fourier_convolve(s2p_files_copy, thru):
-    # Function to apply a fourier filter to the data to remove noise - is applied to the list of all the files so it can be the first step in the analysis
-    # The threshold is the frequency above which the noise is removed
+    # Function attempting to convert the s2p data and the thru reference to the time domain -> carry out a deconvolution between them -> then convert back to the frequency domain
+    # I think the aim is to treat it as though the thru data is convolved with the device data and can therefore be removed by dividing in the time domain
     # The function then returns the filtered data back into the list of s2p files
     
     thru_average = np.zeros((len(s2p_files_copy[0].network.f),2,2), dtype=complex) #initiate object to store empty FFT average of all the thru data for each s param hence the 2,2
