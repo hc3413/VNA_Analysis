@@ -732,7 +732,7 @@ def fourier_filter(s2p_files_copy, threshold = [1.8e-8,2.2e-8], t_window = False
         # Change the label to indicate the data has been filtered
         s.filename = s.filename[0:-1] + '_FFT_filtered'
 
-    plt.figure(figsize=(5, 2))
+    plt.figure(figsize=(10, 4))
     plt.plot(times,sum_freqs, color='blue',linestyle =':')
     plt.plot(times,sum_freqs_filtered, color='green')
     for thr in threshold:
