@@ -322,6 +322,9 @@ def deembed_ABCD(s2p_files, ABCD):
 
 def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = None,
             x_range = slice(0,-1), log_x = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True):
+    from plot_style import apply_plot_style
+    apply_plot_style()   # enforce the shared style contract (2026-08-10)
+
     # Function to plot the data for the selected devices and states
     # A number of inputs are given default values so they can be omitted from the function input if not required as they are quite standard
     # The default values also means that you can call them by name and not require the perfect ordring of the inputs
@@ -453,6 +456,9 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
 def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             x_range = slice(0,-1), log_x = False, log_y = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True, iterate_lines = False,
             p_legend = True, window_size = 0,R_in = [30e3],dot_line = False):
+    from plot_style import apply_plot_style
+    apply_plot_style()   # enforce the shared style contract (2026-08-10)
+
     # Plotting function that takes an input of a list of lists
     # The function then plots all the devices in each subset on the same graph giving different color maps to each subset
     # and different colors within each subset for each device
