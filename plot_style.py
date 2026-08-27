@@ -29,10 +29,10 @@ except ImportError:                    # standalone / plugin context
 # re-apply it through apply_plot_style() so that they never silently discard
 # settings the notebook chose (see that function for why this matters).
 _LAST_STYLE = {'export_data': False, 'powerpoint_data': False,
-               'use_tex': True, 'markersize': None}
+               'use_tex': False, 'markersize': None}
 
 
-def set_plot_style(export_data = False, powerpoint_data = False, use_tex=True, markersize=None):
+def set_plot_style(export_data = False, powerpoint_data = False, use_tex=False, markersize=None):
     """
     Set publication-quality plot styles.
 
@@ -70,6 +70,10 @@ def set_plot_style(export_data = False, powerpoint_data = False, use_tex=True, m
         'savefig.dpi': 600,
         
         # Font and text settings
+        # Editable SVG text (working-with-my-files.md, 7 Aug 2026): keep text
+        # as TEXT so labels stay editable in Affinity/Inkscape. Requires
+        # use_tex=False - usetex always outputs text as paths regardless.
+        'svg.fonttype': 'none',
         'font.family': ['serif'],
         'font.size': 9,  # Base font size
         'axes.labelsize': 10,
@@ -269,6 +273,7 @@ def generate_colormaps_and_normalizers(dat):
 # listed here a repo is free to override.
 # ---------------------------------------------------------------------------
 STYLE_CONTRACT = {
+    'svg.fonttype': 'none',
     'savefig.dpi': 600,
     'savefig.bbox': 'tight',
     'savefig.pad_inches': 0.05,
@@ -331,13 +336,13 @@ AXIS_LABELS = {
     "current_density": "Current density (A/cm$^2$)",
     "temperature": "Temperature (K)",
     "capacitance": "Capacitance (F)",
-    "impedance": "Impedance ($\Omega$)",
+    "impedance": r"Impedance ($\Omega$)",
     "phase": "Phase (deg)",
-    "polarisation": "Polarisation ($\mu$C/cm$^2$)",
+    "polarisation": r"Polarisation ($\mu$C/cm$^2$)",
     "electric_field": "Electric field (kV/cm)",
     "magnetic_field": "Magnetic field (T)",
-    "resistance": "Resistance ($\Omega$)",
-    "sheet_resistance": "Sheet resistance ($\Omega$/sq)",
+    "resistance": r"Resistance ($\Omega$)",
+    "sheet_resistance": r"Sheet resistance ($\Omega$/sq)",
     "mobility": "Mobility (cm$^2$/Vs)",
     "carrier_density_2d": "Carrier density (cm$^{-2}$)",
     "carrier_density_3d": "Carrier density (cm$^{-3}$)",
@@ -379,7 +384,10 @@ def save_figure(fig, output_stem, formats=('svg', 'tiff'), dpi=600,
     stem.parent.mkdir(parents=True, exist_ok=True)
     written = []
     for ext in formats:
-        out = stem.with_suffix('.' + ext.lstrip('.'))
+        # NOT Path.with_suffix(): a stem like 'DR009_CV_Vdc_+0.50V' contains
+        # a decimal point, and with_suffix would truncate it to '..._Vdc_+0.svg'
+        # (silently overwriting the 0.25V/0.75V exports with each other).
+        out = stem.parent / (stem.name + '.' + ext.lstrip('.'))
         fig.savefig(out, dpi=dpi, transparent=transparent)
         written.append(out)
     if close:

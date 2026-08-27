@@ -101,7 +101,7 @@ def import_data(data_path: str):
             'set(1)','set1','set(2)','set2','set(3)','set3','set(4)','set4','set(5)','set5','set(6)','set6','set(7)','set7', 'set(8)','set8', 
             'formed(0)','formed0','formed(1)','formed1','formed(2)','formed2','formed(3)','formed3','formed(4)','formed4','formed(5)','formed5','formed(6)','formed6',
             'formed(7)','formed7','formed(8)','formed8','formed(9)','formed9','formed(10)','formed10','formed(11)','formed11','formed(12)','formed12',
-            'pristine', 'formed', 'thru', 'open', 'short','set','reset']
+            'pristine', 'formed', 'thru', 'open', 'short','reset','set'] #reset BEFORE set: 'set' is a substring of 'reset', so bare reset files were mislabelled 'set'
         state = next((x for x in keywords if x in f.lower()), None) #returns the first keyword found in the state value, stops as soon as the first keyword is found
         # Extract the row, colum and wafer numbers from the filename (e.g. wafer 1 r1_c11) and store into position variable
         wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)
@@ -322,6 +322,9 @@ def deembed_ABCD(s2p_files, ABCD):
 
 def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = None,
             x_range = slice(0,-1), log_x = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True):
+    from plot_style import apply_plot_style
+    apply_plot_style()   # enforce the shared style contract (2026-08-10)
+
     # Function to plot the data for the selected devices and states
     # A number of inputs are given default values so they can be omitted from the function input if not required as they are quite standard
     # The default values also means that you can call them by name and not require the perfect ordring of the inputs
@@ -453,6 +456,9 @@ def keyplot(dev, cal_in = [], dev_selection = None, sub_set = None, y_range = No
 def sub_plot(ax, dev_subset = [], cal_in = [], y_range = None,
             x_range = slice(0,-1), log_x = False, log_y = False, plot_type = ['S_db'],m_port=[2], n_port=[1], deembed_data = True, iterate_lines = False,
             p_legend = True, window_size = 0,R_in = [30e3],dot_line = False):
+    from plot_style import apply_plot_style
+    apply_plot_style()   # enforce the shared style contract (2026-08-10)
+
     # Plotting function that takes an input of a list of lists
     # The function then plots all the devices in each subset on the same graph giving different color maps to each subset
     # and different colors within each subset for each device

@@ -1,0 +1,17 @@
+# VNA_Analysis - install with: pip install -r requirements.txt
+# (cloud/Cowork sessions rebuild the environment from this list; the local
+#  VNAenv contains Mac-only binaries and cannot be reused there)
+numpy
+pandas
+scipy
+scikit-rf          # S-parameter handling and calibration
+matplotlib
+seaborn            # plot_style colour palette
+cycler
+plotly             # interactive notebook views
+imageio
+pillow
+ipykernel          # notebooks
+
+# The Phase-4 bridge (vna_bridge.py) also needs the IS_Analysis stack;
+# run bridge scripts with ../IS_Analysis/ISvenv (scikit-rf==1.0.0 pinned there).
