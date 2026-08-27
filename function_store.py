@@ -101,7 +101,7 @@ def import_data(data_path: str):
             'set(1)','set1','set(2)','set2','set(3)','set3','set(4)','set4','set(5)','set5','set(6)','set6','set(7)','set7', 'set(8)','set8', 
             'formed(0)','formed0','formed(1)','formed1','formed(2)','formed2','formed(3)','formed3','formed(4)','formed4','formed(5)','formed5','formed(6)','formed6',
             'formed(7)','formed7','formed(8)','formed8','formed(9)','formed9','formed(10)','formed10','formed(11)','formed11','formed(12)','formed12',
-            'pristine', 'formed', 'thru', 'open', 'short','set','reset']
+            'pristine', 'formed', 'thru', 'open', 'short','reset','set'] #reset BEFORE set: 'set' is a substring of 'reset', so bare reset files were mislabelled 'set'
         state = next((x for x in keywords if x in f.lower()), None) #returns the first keyword found in the state value, stops as soon as the first keyword is found
         # Extract the row, colum and wafer numbers from the filename (e.g. wafer 1 r1_c11) and store into position variable
         wafer_number = re.findall(r'Wafer(\d)', f, re.IGNORECASE)
